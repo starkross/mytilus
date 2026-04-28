@@ -1,0 +1,27 @@
+# mytilus cargo configuration.
+#
+# We deliberately do NOT set [build].target here, so that `cargo check` /
+# `cargo test` work on the host (macOS, Linux/x86_64) for unit tests and IDE
+# integration. Cross-compilation for the real target goes through Taskfile.
+
+[unstable]
+# Build core/alloc/compiler_builtins from source when targeting the custom
+# spec. Without this, cargo refuses to build for an unknown target.
+build-std = ["core", "alloc", "compiler_builtins"]
+# Note: we explicitly do NOT enable "compiler-builtins-mem". We provide our
+# own canonical memcpy/memset/memmove/memcmp from mytilus-string.
+build-std-features = []
+
+[target.aarch64-unknown-linux-mytilus]
+linker = "rust-lld"
+rustflags = [
+    # Position-independent: required for libc.so and PIE binaries.
+    "-C", "relocation-model=pic",
+    # No unwinding tables — panic=abort handles all error exits.
+    "-C", "panic=abort",
+    # Don't let LLVM emit calls to libcalls we haven't defined yet.
+    "-C", "link-arg=-nostdlib",
+]
+
+# Convenience alias so `cargo build --target aarch64` resolves to the spec.
+# (Cargo still requires the full path; Taskfile uses the JSON file directly.)

@@ -1,0 +1,19 @@
+[package]
+name = "mytilus-search"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+description = "tsearch, hsearch, lsearch."
+publish = false
+
+[lints]
+workspace = true
+
+[lib]
+name = "mytilus_search"
+
+
+[dependencies]
+mytilus-sys.path = "../mytilus-sys"
+mytilus-malloc.path = "../mytilus-malloc"

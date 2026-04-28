@@ -1,0 +1,72 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/mytilus-sys",
+    "crates/mytilus-internal",
+    "crates/mytilus-errno",
+    "crates/mytilus-string",
+    "crates/mytilus-stdio",
+    "crates/mytilus-stdlib",
+    "crates/mytilus-malloc",
+    "crates/mytilus-math",
+    "crates/mytilus-time",
+    "crates/mytilus-locale",
+    "crates/mytilus-thread",
+    "crates/mytilus-signal",
+    "crates/mytilus-fcntl",
+    "crates/mytilus-unistd",
+    "crates/mytilus-mman",
+    "crates/mytilus-process",
+    "crates/mytilus-fs",
+    "crates/mytilus-net",
+    "crates/mytilus-passwd",
+    "crates/mytilus-crypt",
+    "crates/mytilus-prng",
+    "crates/mytilus-search",
+    "crates/mytilus-regex",
+    "crates/mytilus-ipc",
+    "crates/mytilus-aio",
+    "crates/mytilus-startup",
+    "crates/mytilus-ldso",
+    "crates/mytilus",
+]
+default-members = ["crates/mytilus"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+authors = ["mytilus contributors"]
+description = "musl libc, reimplemented in Rust — aarch64 Linux, 64-bit only"
+repository = "https://example.invalid/mytilus"
+publish = false
+
+[workspace.lints.rust]
+unsafe_op_in_unsafe_fn = "warn"
+unused_must_use = "deny"
+missing_docs = "allow"
+
+[workspace.lints.clippy]
+missing_safety_doc = "warn"
+undocumented_unsafe_blocks = "warn"
+# Tighten over time.
+
+[profile.dev]
+panic = "abort"
+opt-level = 0
+debug = "full"
+overflow-checks = true
+
+[profile.release]
+opt-level = "s"
+lto = "fat"
+codegen-units = 1
+debug = "line-tables-only"
+overflow-checks = false
+panic = "abort"
+strip = "none"
+
+# Opt-in faster profile for perf-critical crates (string, math, malloc).
+[profile.release-perf]
+inherits = "release"
+opt-level = 3

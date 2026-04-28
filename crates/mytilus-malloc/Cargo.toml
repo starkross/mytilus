@@ -1,0 +1,20 @@
+[package]
+name = "mytilus-malloc"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+description = "mallocng port + lite_malloc bootstrap allocator."
+publish = false
+
+[lints]
+workspace = true
+
+[lib]
+name = "mytilus_malloc"
+
+
+[dependencies]
+mytilus-sys.path = "../mytilus-sys"
+mytilus-internal.path = "../mytilus-internal"
+mytilus-mman.path = "../mytilus-mman"

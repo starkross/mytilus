@@ -1,0 +1,22 @@
+[package]
+name = "mytilus-thread"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+description = "pthreads, semaphores, TLS, cancellation."
+publish = false
+
+[lints]
+workspace = true
+
+[lib]
+name = "mytilus_thread"
+
+
+[dependencies]
+mytilus-sys.path = "../mytilus-sys"
+mytilus-internal.path = "../mytilus-internal"
+mytilus-errno.path = "../mytilus-errno"
+mytilus-mman.path = "../mytilus-mman"
+mytilus-malloc.path = "../mytilus-malloc"

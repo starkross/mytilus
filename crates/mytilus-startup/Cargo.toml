@@ -1,0 +1,21 @@
+[package]
+name = "mytilus-startup"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+description = "crt1, crti, crtn, Scrt1, rcrt1 and __libc_start_main."
+publish = false
+
+[lints]
+workspace = true
+
+[lib]
+name = "mytilus_startup"
+
+
+[dependencies]
+mytilus-sys.path = "../mytilus-sys"
+mytilus-internal.path = "../mytilus-internal"
+mytilus-mman.path = "../mytilus-mman"
+mytilus-thread.path = "../mytilus-thread"

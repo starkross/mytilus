@@ -1,0 +1,21 @@
+[package]
+name = "mytilus-ipc"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+description = "SysV IPC, POSIX mq, POSIX shm, POSIX sem."
+publish = false
+
+[lints]
+workspace = true
+
+[lib]
+name = "mytilus_ipc"
+
+
+[dependencies]
+mytilus-sys.path = "../mytilus-sys"
+mytilus-internal.path = "../mytilus-internal"
+mytilus-errno.path = "../mytilus-errno"
+mytilus-malloc.path = "../mytilus-malloc"

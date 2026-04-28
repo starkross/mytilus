@@ -1,0 +1,19 @@
+[package]
+name = "mytilus-prng"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+description = "rand/random/erand48/getrandom."
+publish = false
+
+[lints]
+workspace = true
+
+[lib]
+name = "mytilus_prng"
+
+
+[dependencies]
+mytilus-sys.path = "../mytilus-sys"
+mytilus-internal.path = "../mytilus-internal"

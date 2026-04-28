@@ -1,0 +1,23 @@
+[package]
+name = "mytilus-time"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+description = "Clock, time, mktime, strftime, TZif parser."
+publish = false
+
+[lints]
+workspace = true
+
+[lib]
+name = "mytilus_time"
+
+
+[dependencies]
+mytilus-sys.path = "../mytilus-sys"
+mytilus-internal.path = "../mytilus-internal"
+mytilus-errno.path = "../mytilus-errno"
+mytilus-malloc.path = "../mytilus-malloc"
+mytilus-fcntl.path = "../mytilus-fcntl"
+mytilus-unistd.path = "../mytilus-unistd"

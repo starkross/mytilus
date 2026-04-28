@@ -1,0 +1,148 @@
+version: '3'
+
+# mytilus task runner. Wraps cargo so contributors don't have to remember
+# the cross-compile incantation, and keeps CI and local builds identical.
+
+vars:
+  TARGET: aarch64-unknown-linux-mytilus
+  TARGET_SPEC: '{{.TASKFILE_DIR}}/aarch64-unknown-linux-mytilus.json'
+  PREFIX: '{{.PREFIX | default "./dist"}}'
+
+env:
+  RUST_BACKTRACE: '1'
+  CARGO_TERM_COLOR: always
+
+tasks:
+  default:
+    desc: List all tasks
+    cmds:
+      - task --list-all
+
+  # ──────────────────────────────────────────────────────────────────────
+  # Build
+  # ──────────────────────────────────────────────────────────────────────
+
+  build:
+    desc: Build all crates for aarch64-linux (release)
+    cmds:
+      - cargo build --release --target {{.TARGET_SPEC}}
+
+  build:debug:
+    desc: Build all crates for aarch64-linux (debug)
+    cmds:
+      - cargo build --target {{.TARGET_SPEC}}
+
+  build:perf:
+    desc: Build perf-critical crates with the release-perf profile
+    cmds:
+      - cargo build --profile release-perf --target {{.TARGET_SPEC}}
+        -p mytilus-string -p mytilus-math -p mytilus-malloc
+
+  build:host:
+    desc: Build the workspace on the host (sanity check, no cross)
+    cmds:
+      - cargo build --workspace
+
+  # ──────────────────────────────────────────────────────────────────────
+  # Check / lint / format
+  # ──────────────────────────────────────────────────────────────────────
+
+  check:
+    desc: cargo check for the aarch64 target
+    cmds:
+      - cargo check --target {{.TARGET_SPEC}} --workspace
+
+  check:host:
+    desc: cargo check on the host (for IDE / quick feedback)
+    cmds:
+      - cargo check --workspace --all-targets
+
+  clippy:
+    desc: Run clippy against the aarch64 target
+    cmds:
+      - cargo clippy --target {{.TARGET_SPEC}} --workspace -- -D warnings
+
+  clippy:host:
+    desc: Run clippy on the host
+    cmds:
+      - cargo clippy --workspace --all-targets -- -D warnings
+
+  fmt:
+    desc: Format the entire workspace
+    cmds:
+      - cargo fmt --all
+
+  fmt:check:
+    desc: Verify formatting (CI gate)
+    cmds:
+      - cargo fmt --all -- --check
+
+  # ──────────────────────────────────────────────────────────────────────
+  # Test
+  # ──────────────────────────────────────────────────────────────────────
+
+  test:
+    desc: Run host-side unit tests for crates that have them
+    cmds:
+      - cargo test --workspace
+
+  test:qemu:
+    desc: Run target-side integration tests under qemu-user
+    cmds:
+      - echo "TODO: wire qemu-aarch64 runner via cargo's runner config"
+
+  # ──────────────────────────────────────────────────────────────────────
+  # ABI / symbol checks
+  # ──────────────────────────────────────────────────────────────────────
+
+  symbols:list:
+    desc: List exported symbols from the built libc.so
+    deps: [build]
+    cmds:
+      - echo "TODO: nm -D --defined-only target/{{.TARGET}}/release/libc.so"
+
+  symbols:diff:
+    desc: Diff exported symbols vs. upstream musl
+    cmds:
+      - echo "TODO: compare against ../musl built with the same toolchain"
+
+  abi:diff:
+    desc: Run abidiff against upstream musl libc.so
+    cmds:
+      - echo "TODO: abidiff --headers-dir1 ./headers --headers-dir2 ../musl/include ..."
+
+  # ──────────────────────────────────────────────────────────────────────
+  # Install / package
+  # ──────────────────────────────────────────────────────────────────────
+
+  install:
+    desc: 'Stage libc.so / libc.a / crt*.o / headers into PREFIX (default ./dist)'
+    deps: [build]
+    cmds:
+      - mkdir -p {{.PREFIX}}/lib {{.PREFIX}}/include
+      - echo "TODO: copy artifacts into {{.PREFIX}}"
+
+  headers:install:
+    desc: Install C headers into PREFIX/include
+    cmds:
+      - mkdir -p {{.PREFIX}}/include
+      - echo "TODO: copy headers/ into {{.PREFIX}}/include"
+
+  # ──────────────────────────────────────────────────────────────────────
+  # Housekeeping
+  # ──────────────────────────────────────────────────────────────────────
+
+  clean:
+    desc: Remove all build artifacts
+    cmds:
+      - cargo clean
+      - rm -rf {{.PREFIX}}
+
+  ci:
+    desc: Run the same checks CI runs
+    cmds:
+      - task: fmt:check
+      - task: check
+      - task: clippy
+      - task: test
+      - task: build

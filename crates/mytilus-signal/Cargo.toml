@@ -1,0 +1,20 @@
+[package]
+name = "mytilus-signal"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+description = "sigaction, signal, sigset, signal-restore trampoline."
+publish = false
+
+[lints]
+workspace = true
+
+[lib]
+name = "mytilus_signal"
+
+
+[dependencies]
+mytilus-sys.path = "../mytilus-sys"
+mytilus-internal.path = "../mytilus-internal"
+mytilus-errno.path = "../mytilus-errno"

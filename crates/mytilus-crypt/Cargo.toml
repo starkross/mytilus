@@ -1,0 +1,20 @@
+[package]
+name = "mytilus-crypt"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+description = "crypt(), crypt_r(), bcrypt, sha-crypt, DES fallback."
+publish = false
+
+[lints]
+workspace = true
+
+[lib]
+name = "mytilus_crypt"
+
+
+[dependencies]
+mytilus-sys.path = "../mytilus-sys"
+mytilus-string.path = "../mytilus-string"
+mytilus-malloc.path = "../mytilus-malloc"

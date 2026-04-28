@@ -1,0 +1,21 @@
+[package]
+name = "mytilus-aio"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+description = "aio_* user-space implementation."
+publish = false
+
+[lints]
+workspace = true
+
+[lib]
+name = "mytilus_aio"
+
+
+[dependencies]
+mytilus-sys.path = "../mytilus-sys"
+mytilus-internal.path = "../mytilus-internal"
+mytilus-errno.path = "../mytilus-errno"
+mytilus-thread.path = "../mytilus-thread"

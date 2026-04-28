@@ -1,0 +1,10 @@
+[toolchain]
+# Pinned nightly. Bump deliberately; CI must rerun the full conformance suite.
+channel = "nightly-2026-01-15"
+components = [
+    "rust-src",      # required for -Z build-std
+    "rustfmt",
+    "clippy",
+    "llvm-tools-preview",
+]
+profile = "minimal"

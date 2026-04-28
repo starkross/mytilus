@@ -1,0 +1,15 @@
+[package]
+name = "mytilus-sys"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+description = "Raw aarch64 Linux syscall layer and C type definitions."
+publish = false
+
+[lints]
+workspace = true
+
+[lib]
+name = "mytilus_sys"
+

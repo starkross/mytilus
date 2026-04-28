@@ -1,0 +1,43 @@
+[package]
+name = "mytilus"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+description = "Umbrella crate. Re-exports every public symbol; built as libc.so / libc.a."
+publish = false
+
+[lints]
+workspace = true
+
+[lib]
+name = "c"
+# crate-type = ["cdylib", "staticlib", "rlib"]  # enable once a panic_handler is wired
+
+[dependencies]
+mytilus-sys.path = "../mytilus-sys"
+mytilus-internal.path = "../mytilus-internal"
+mytilus-errno.path = "../mytilus-errno"
+mytilus-string.path = "../mytilus-string"
+mytilus-stdio.path = "../mytilus-stdio"
+mytilus-stdlib.path = "../mytilus-stdlib"
+mytilus-malloc.path = "../mytilus-malloc"
+mytilus-math.path = "../mytilus-math"
+mytilus-time.path = "../mytilus-time"
+mytilus-locale.path = "../mytilus-locale"
+mytilus-thread.path = "../mytilus-thread"
+mytilus-signal.path = "../mytilus-signal"
+mytilus-fcntl.path = "../mytilus-fcntl"
+mytilus-unistd.path = "../mytilus-unistd"
+mytilus-mman.path = "../mytilus-mman"
+mytilus-process.path = "../mytilus-process"
+mytilus-fs.path = "../mytilus-fs"
+mytilus-net.path = "../mytilus-net"
+mytilus-passwd.path = "../mytilus-passwd"
+mytilus-crypt.path = "../mytilus-crypt"
+mytilus-prng.path = "../mytilus-prng"
+mytilus-search.path = "../mytilus-search"
+mytilus-regex.path = "../mytilus-regex"
+mytilus-ipc.path = "../mytilus-ipc"
+mytilus-aio.path = "../mytilus-aio"
+mytilus-startup.path = "../mytilus-startup"

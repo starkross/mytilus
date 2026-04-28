@@ -1,0 +1,19 @@
+[package]
+name = "mytilus-unistd"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+description = "read/write/lseek/dup/pipe and friends."
+publish = false
+
+[lints]
+workspace = true
+
+[lib]
+name = "mytilus_unistd"
+
+
+[dependencies]
+mytilus-sys.path = "../mytilus-sys"
+mytilus-errno.path = "../mytilus-errno"

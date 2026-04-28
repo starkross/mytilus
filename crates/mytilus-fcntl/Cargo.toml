@@ -1,0 +1,19 @@
+[package]
+name = "mytilus-fcntl"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+description = "open/openat/fcntl/creat."
+publish = false
+
+[lints]
+workspace = true
+
+[lib]
+name = "mytilus_fcntl"
+
+
+[dependencies]
+mytilus-sys.path = "../mytilus-sys"
+mytilus-errno.path = "../mytilus-errno"

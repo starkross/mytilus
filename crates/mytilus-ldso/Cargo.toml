@@ -1,0 +1,21 @@
+[package]
+name = "mytilus-ldso"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+description = "Dynamic linker. Becomes ld-musl-aarch64.so.1. MUST NOT depend on mytilus-malloc."
+publish = false
+
+[lints]
+workspace = true
+
+[lib]
+name = "mytilus_ldso"
+# crate-type = ["cdylib"]  # enable once dlstart bootstrap is ready
+
+[dependencies]
+mytilus-sys.path = "../mytilus-sys"
+mytilus-internal.path = "../mytilus-internal"
+mytilus-string.path = "../mytilus-string"
+mytilus-mman.path = "../mytilus-mman"

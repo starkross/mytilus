@@ -1,0 +1,22 @@
+[package]
+name = "mytilus-locale"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+description = "Locale, iconv, multibyte, message catalog."
+publish = false
+
+[lints]
+workspace = true
+
+[lib]
+name = "mytilus_locale"
+
+
+[dependencies]
+mytilus-sys.path = "../mytilus-sys"
+mytilus-internal.path = "../mytilus-internal"
+mytilus-errno.path = "../mytilus-errno"
+mytilus-string.path = "../mytilus-string"
+mytilus-malloc.path = "../mytilus-malloc"

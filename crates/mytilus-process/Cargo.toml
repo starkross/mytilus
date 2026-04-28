@@ -1,0 +1,22 @@
+[package]
+name = "mytilus-process"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+description = "fork, vfork, posix_spawn, wait*, exec*."
+publish = false
+
+[lints]
+workspace = true
+
+[lib]
+name = "mytilus_process"
+
+
+[dependencies]
+mytilus-sys.path = "../mytilus-sys"
+mytilus-internal.path = "../mytilus-internal"
+mytilus-errno.path = "../mytilus-errno"
+mytilus-thread.path = "../mytilus-thread"
+mytilus-signal.path = "../mytilus-signal"
