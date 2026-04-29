@@ -7,6 +7,9 @@ vars:
   TARGET: aarch64-unknown-linux-mytilus
   TARGET_SPEC: '{{.TASKFILE_DIR}}/aarch64-unknown-linux-mytilus.json'
   PREFIX: '{{.PREFIX | default "./dist"}}'
+  # build-std is required for the custom target (no prebuilt sysroot) but
+  # MUST NOT be applied to host commands — see .cargo/config.toml.
+  BUILD_STD: '-Z build-std=core,alloc,compiler_builtins -Z build-std-features='
 
 env:
   RUST_BACKTRACE: '1'
@@ -25,17 +28,17 @@ tasks:
   build:
     desc: Build all crates for aarch64-linux (release)
     cmds:
-      - cargo build --release --target {{.TARGET_SPEC}}
+      - cargo build --release --target {{.TARGET_SPEC}} {{.BUILD_STD}}
 
   build:debug:
     desc: Build all crates for aarch64-linux (debug)
     cmds:
-      - cargo build --target {{.TARGET_SPEC}}
+      - cargo build --target {{.TARGET_SPEC}} {{.BUILD_STD}}
 
   build:perf:
     desc: Build perf-critical crates with the release-perf profile
     cmds:
-      - cargo build --profile release-perf --target {{.TARGET_SPEC}}
+      - cargo build --profile release-perf --target {{.TARGET_SPEC}} {{.BUILD_STD}}
         -p mytilus-string -p mytilus-math -p mytilus-malloc
 
   build:host:
@@ -50,7 +53,7 @@ tasks:
   check:
     desc: cargo check for the aarch64 target
     cmds:
-      - cargo check --target {{.TARGET_SPEC}} --workspace
+      - cargo check --target {{.TARGET_SPEC}} --workspace {{.BUILD_STD}}
 
   check:host:
     desc: cargo check on the host (for IDE / quick feedback)
@@ -60,7 +63,7 @@ tasks:
   clippy:
     desc: Run clippy against the aarch64 target
     cmds:
-      - cargo clippy --target {{.TARGET_SPEC}} --workspace -- -D warnings
+      - cargo clippy --target {{.TARGET_SPEC}} --workspace {{.BUILD_STD}} -- -D warnings
 
   clippy:host:
     desc: Run clippy on the host
