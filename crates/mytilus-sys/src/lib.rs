@@ -14,6 +14,7 @@
 
 pub mod ctypes;
 pub mod errno_raw;
+pub mod nr;
 pub mod syscall;
 
 pub use ctypes::*;
