@@ -17,3 +17,4 @@ name = "mytilus_string"
 [dependencies]
 mytilus-sys.path = "../mytilus-sys"
 mytilus-errno.path = "../mytilus-errno"
+mytilus-locale.path = "../mytilus-locale"

@@ -112,10 +112,6 @@ dependencies = [
 name = "mytilus-locale"
 version = "0.1.0"
 dependencies = [
- "mytilus-errno",
- "mytilus-internal",
- "mytilus-malloc",
- "mytilus-string",
  "mytilus-sys",
 ]
 
@@ -249,6 +245,7 @@ name = "mytilus-string"
 version = "0.1.0"
 dependencies = [
  "mytilus-errno",
+ "mytilus-locale",
  "mytilus-sys",
 ]
 
