@@ -4,15 +4,13 @@
     "description": "mytilus target: ARMv8-A 64-bit Linux, little-endian, mytilus libc",
     "host_tools": false,
     "std": false,
-    "tier": "custom"
+    "tier": 3
   },
   "arch": "aarch64",
-  "data-layout": "e-m:e-i8:8:32-i16:16:32-i64:64-i128:128-n32:64-S128",
-  "target-pointer-width": "64",
-  "target-c-int-width": "32",
+  "data-layout": "e-m:e-p270:32:32-p271:32:32-p272:64:64-i8:8:32-i16:16:32-i64:64-i128:128-n32:64-S128-Fn32",
+  "target-pointer-width": 64,
   "target-endian": "little",
   "max-atomic-width": 128,
-  "pointer-width": "64",
 
   "os": "linux",
   "env": "musl",
@@ -36,7 +34,7 @@
   "dynamic-linking": true,
   "has-rpath": true,
   "has-thread-local": true,
-  "tls-model": "general-dynamic",
+  "tls-model": "global-dynamic",
 
   "crt-objects-fallback": "false",
   "crt-static-respected": true,

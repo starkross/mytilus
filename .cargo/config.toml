@@ -4,13 +4,14 @@
 # `cargo test` work on the host (macOS, Linux/x86_64) for unit tests and IDE
 # integration. Cross-compilation for the real target goes through Taskfile.
 
-[unstable]
-# Build core/alloc/compiler_builtins from source when targeting the custom
-# spec. Without this, cargo refuses to build for an unknown target.
-build-std = ["core", "alloc", "compiler_builtins"]
-# Note: we explicitly do NOT enable "compiler-builtins-mem". We provide our
-# own canonical memcpy/memset/memmove/memcmp from mytilus-string.
-build-std-features = []
+# `-Z build-std` is NOT set here: it would also apply to host builds (cargo
+# test / cargo check on the host toolchain) and clash with the prebuilt
+# sysroot's `core`. The Taskfile passes `-Z build-std=core,alloc,compiler_builtins`
+# only to cross-compile commands.
+#
+# We explicitly do NOT enable the "compiler-builtins-mem" feature when we do
+# pass build-std — we provide our own canonical memcpy/memset/memmove/memcmp
+# from mytilus-string.
 
 [target.aarch64-unknown-linux-mytilus]
 linker = "rust-lld"
