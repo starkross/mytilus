@@ -19,7 +19,7 @@
 //! buildable on the host while making accidental host execution loud. Real
 //! syscall coverage runs under `qemu-aarch64` (TODO: wire `task test:qemu`).
 
-use crate::ctypes::c_long;
+use crate::ctypes::{c_int, c_long};
 
 /// Issue a syscall with no arguments.
 ///
@@ -233,4 +233,35 @@ pub unsafe fn syscall6(
 #[inline]
 pub fn is_err(rc: c_long) -> bool {
     (rc as u64) >= (-4096_i64 as u64)
+}
+
+// `__errno_location` is provided by `mytilus-errno`. We declare it `extern "C"`
+// so this crate can stay free of a Rust-level dep on errno; the linker
+// resolves the symbol at final-link time. (mytilus-sys deliberately sits at
+// the bottom of the dep graph.)
+unsafe extern "C" {
+    fn __errno_location() -> *mut c_int;
+}
+
+/// Apply the C-ABI return-value convention to a raw kernel return:
+/// if `r` is `-errno`, set `errno` and return `-1`; otherwise pass through.
+///
+/// For pointer-returning syscalls (`mmap`, `mremap`), callers cast the
+/// result to `*mut c_void` — `-1 as *mut c_void` is the same bit pattern
+/// as `MAP_FAILED`, so the convention works for both shapes.
+///
+/// # Safety
+/// Must run on a target where `__errno_location` is linked in (i.e. with
+/// `mytilus-errno` in the final binary).
+#[inline]
+pub unsafe fn ret(r: c_long) -> c_long {
+    if is_err(r) {
+        // SAFETY: __errno_location is contractually a valid TLS pointer.
+        unsafe {
+            *__errno_location() = -r as c_int;
+        }
+        -1
+    } else {
+        r
+    }
 }
