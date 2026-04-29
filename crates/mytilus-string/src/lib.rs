@@ -25,6 +25,8 @@
 
 mod mem;
 mod str_fns;
+mod str_search;
 
 pub use mem::*;
 pub use str_fns::*;
+pub use str_search::*;
