@@ -16,7 +16,8 @@ name = "mytilus_locale"
 
 [dependencies]
 mytilus-sys.path = "../mytilus-sys"
-mytilus-internal.path = "../mytilus-internal"
-mytilus-errno.path = "../mytilus-errno"
-mytilus-string.path = "../mytilus-string"
-mytilus-malloc.path = "../mytilus-malloc"
+# Other deps (mytilus-internal, mytilus-errno, mytilus-string, mytilus-malloc)
+# will be added back when setlocale/iconv/etc. arrive. The Phase-1 ctype
+# subset is pure data-table work and only needs c_int from mytilus-sys; the
+# setlocale-uses-strcmp dep cycle (mytilus-string -> mytilus-locale ->
+# mytilus-string) needs to be resolved before re-adding mytilus-string.

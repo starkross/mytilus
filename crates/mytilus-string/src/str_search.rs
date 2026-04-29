@@ -8,13 +8,14 @@
 //! the Crochemore–Perrin Two-Way string-matching algorithm for ≥5-byte
 //! needles. That's worth ~150 LOC of tricky code; deferred until needed.
 //!
-//! TODO(locale): `strcasecmp`/`strncasecmp` use ASCII case-folding. The
-//! `_l` variants currently delegate verbatim because upstream musl's
-//! `__strcasecmp_l` itself just calls `strcasecmp` (no real locale-aware
-//! case-folding in musl), so behavior matches.
+//! Case-folding for `strcasecmp`/`strncasecmp` goes through
+//! `mytilus_locale::tolower`. The `_l` wrappers ignore their `locale_t`
+//! argument because upstream musl's `__strcasecmp_l` does too — musl is C
+//! locale only.
 
 use core::sync::atomic::{AtomicPtr, Ordering};
 
+use mytilus_locale::tolower;
 use mytilus_sys::ctypes::{c_char, c_int, c_void, size_t};
 
 use crate::str_fns::__strchrnul;
@@ -36,15 +37,11 @@ fn byteset_test(bs: &Byteset, b: u8) -> bool {
     (bs[(b as usize) / 64] >> (b as usize % 64)) & 1 != 0
 }
 
-/// ASCII-only case fold. Stand-in until `mytilus_locale::tolower` exists;
-/// when it does, the C `strcasecmp` should switch to it.
+/// Case-fold a byte through `mytilus_locale::tolower` and return the byte.
+/// Wraps the `c_int`→`c_int` C ABI in the form we need for byte comparisons.
 #[inline]
-fn ascii_tolower(c: u8) -> u8 {
-    if c.is_ascii_uppercase() {
-        c + 32
-    } else {
-        c
-    }
+fn fold(b: u8) -> u8 {
+    tolower(b as c_int) as u8
 }
 
 // ---------------------------------------------------------------------------
@@ -283,10 +280,10 @@ pub unsafe extern "C" fn strcasecmp(l: *const c_char, r: *const c_char) -> c_int
             let a = *l;
             let b = *r;
             if a == 0 || b == 0 {
-                return ascii_tolower(a) as c_int - ascii_tolower(b) as c_int;
+                return fold(a) as c_int - fold(b) as c_int;
             }
-            if a != b && ascii_tolower(a) != ascii_tolower(b) {
-                return ascii_tolower(a) as c_int - ascii_tolower(b) as c_int;
+            if a != b && fold(a) != fold(b) {
+                return fold(a) as c_int - fold(b) as c_int;
             }
             l = l.add(1);
             r = r.add(1);
@@ -310,12 +307,12 @@ pub unsafe extern "C" fn strncasecmp(l: *const c_char, r: *const c_char, mut n: 
     unsafe {
         let mut l = l;
         let mut r = r;
-        while *l != 0 && *r != 0 && n != 0 && (*l == *r || ascii_tolower(*l) == ascii_tolower(*r)) {
+        while *l != 0 && *r != 0 && n != 0 && (*l == *r || fold(*l) == fold(*r)) {
             l = l.add(1);
             r = r.add(1);
             n -= 1;
         }
-        ascii_tolower(*l) as c_int - ascii_tolower(*r) as c_int
+        fold(*l) as c_int - fold(*r) as c_int
     }
 }
 

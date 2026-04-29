@@ -8,7 +8,7 @@ isn't obvious from the code or commit history.
 Session covered: `mytilus-errno`, `mytilus-prng`, `mytilus-string` (Phase 1
 mem*, Phase 2 str*, Phase 3 search/tokenize/case), `mytilus-sys` syscall
 layer (`svc #0` asm + `ret` errno classifier), `mytilus-mman` (Phase 1: 12
-syscall wrappers).
+syscall wrappers), `mytilus-locale` (Phase 1: ctype subset).
 
 ### Workspace conventions discovered/locked-in
 
@@ -44,6 +44,21 @@ syscall wrappers).
 - **Symbol verification beats host tests** for syscall-wrapping crates.
   Their host tests can only check constants; the real signal is
   disassembling the cross rlib and confirming `mov w8, #NR / svc #0`.
+- **`extern "C" fn` does NOT auto-implement `Fn`/`FnMut`/`FnOnce`** —
+  test harnesses that want to take a C-ABI function as a parameter must
+  declare it as `f: extern "C" fn(...) -> ...`, not `f: F` where
+  `F: Fn(...) -> ...`. The function-item types of `pub extern "C" fn`
+  declarations don't unify with the `Fn` traits even though their
+  signatures match. (Hit while writing the ctype test harness.)
+- **Cycle-avoidance when adding a reverse dep**: scaffold crates often
+  list anticipatory deps (e.g. `mytilus-locale` initially listed
+  `mytilus-string` for the future `setlocale` port). Before adding a
+  *forward* dep that would close the cycle, trim the anticipatory deps
+  and document the trim in the Cargo.toml. We did this for the ctype
+  port: dropped `mytilus-locale → mytilus-string` so we could add
+  `mytilus-string → mytilus-locale`. The future `setlocale` port will
+  need to either inline its own minimal byte-loops, or move ctype to
+  `mytilus-internal`, before re-adding `mytilus-string` as a dep.
 
 ### LLVM / codegen gotchas
 
@@ -97,12 +112,11 @@ serde definitions. Fixed:
   ≥5-byte needles plus 2/3/4-byte rolling-hash specializations.
   ~150 LOC of tricky code; deferred until something benchmarks slow.
   `TODO(perf)`.
-- `strcasecmp`/`strncasecmp` use ASCII-only fold via inline
-  `ascii_tolower`. The `_l` wrappers forward verbatim, which matches
-  upstream musl exactly (musl's `__strcasecmp_l` is also a forwarder).
-  When `mytilus-locale` provides `tolower`, the non-`_l` path can switch.
-  `TODO(locale)`. Note: a minimal ctype subset (~14 fns, ~80 LOC) would
-  unblock this — it's a tractable mini-port.
+- ~~`strcasecmp`/`strncasecmp` use ASCII-only fold via inline
+  `ascii_tolower`.~~ **RESOLVED**: case-fold now goes through
+  `mytilus_locale::tolower`. The `_l` wrappers still forward verbatim
+  (matches upstream — musl's `__strcasecmp_l` is also a forwarder, since
+  musl is C-locale-only).
 
 #### `mytilus-sys`
 - `__syscall_cp` (cancellation-point variant) intentionally still missing
@@ -114,6 +128,26 @@ serde definitions. Fixed:
   deliberately avoid pre-populating the full ~300-entry table.
 - `task test:qemu` is required to actually run anything that hits a real
   syscall; pre-existing TODO in the Taskfile.
+
+#### `mytilus-locale`
+- Phase 1 ports the **ctype subset only** (`isalpha`/`isdigit`/`isspace`/
+  `isupper`/`islower`/`isalnum`/`isxdigit`/`ispunct`/`isprint`/`isgraph`/
+  `iscntrl`/`isblank`/`isascii`/`tolower`/`toupper`/`toascii` plus
+  `__X_l` and `X_l` locale-aware wrappers). 44 C-ABI symbols total.
+- All `__X_l(c, loc)` wrappers ignore `loc` and forward to `X(c)`. This
+  matches upstream musl exactly — musl is documented as "C locale only"
+  for ctype, and its `__isalpha_l` etc. are themselves forwarders.
+- `locale_t` is a placeholder `*mut c_void`. Will be retyped to a real
+  struct when locale machinery (`setlocale`, `newlocale`, etc.) lands.
+- The `_l` symbol pairs (`__X_l` strong + `X_l` weak alias) are emitted
+  via a small `ctype_l!` macro because Rust doesn't have ergonomic
+  weak-alias syntax. Both symbols point to the same body; the
+  visibility-script linker layer can mark `X_l` weak when we get there.
+- Cargo.toml deliberately stripped to just `mytilus-sys` — see the
+  cycle-avoidance note in conventions above.
+- Bit-twiddling tricks ported verbatim from musl
+  (`((unsigned)c|32)-'a' < 26` style) rather than using a 256-entry
+  lookup table. Bit-identical results to upstream.
 
 #### `mytilus-mman`
 - `__vm_wait()` is not called on `MAP_FIXED` / `MREMAP_FIXED`.
