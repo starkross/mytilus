@@ -27,3 +27,14 @@ pub const SYS_mlockall: c_long = 230;
 pub const SYS_munlockall: c_long = 231;
 pub const SYS_mincore: c_long = 232;
 pub const SYS_madvise: c_long = 233;
+
+// ---------------------------------------------------------------------------
+// time (consumed by mytilus-time)
+// ---------------------------------------------------------------------------
+
+pub const SYS_nanosleep: c_long = 101;
+pub const SYS_clock_settime: c_long = 112;
+pub const SYS_clock_gettime: c_long = 113;
+pub const SYS_clock_getres: c_long = 114;
+pub const SYS_clock_nanosleep: c_long = 115;
+pub const SYS_gettimeofday: c_long = 169;
