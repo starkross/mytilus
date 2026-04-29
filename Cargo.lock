@@ -269,11 +269,7 @@ name = "mytilus-time"
 version = "0.1.0"
 dependencies = [
  "mytilus-errno",
- "mytilus-fcntl",
- "mytilus-internal",
- "mytilus-malloc",
  "mytilus-sys",
- "mytilus-unistd",
 ]
 
 [[package]]

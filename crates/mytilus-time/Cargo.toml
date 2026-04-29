@@ -16,8 +16,8 @@ name = "mytilus_time"
 
 [dependencies]
 mytilus-sys.path = "../mytilus-sys"
-mytilus-internal.path = "../mytilus-internal"
 mytilus-errno.path = "../mytilus-errno"
-mytilus-malloc.path = "../mytilus-malloc"
-mytilus-fcntl.path = "../mytilus-fcntl"
-mytilus-unistd.path = "../mytilus-unistd"
+# Other deps (mytilus-internal, mytilus-malloc, mytilus-fcntl, mytilus-unistd)
+# return when mktime/strftime/TZif arrives. Phase 1 ports just the syscall
+# wrappers and needs only the c types from mytilus-sys plus errno's
+# __errno_location for `ret()`.
