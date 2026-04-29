@@ -248,6 +248,7 @@ dependencies = [
 name = "mytilus-string"
 version = "0.1.0"
 dependencies = [
+ "mytilus-errno",
  "mytilus-sys",
 ]
 

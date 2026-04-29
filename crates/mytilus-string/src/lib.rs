@@ -24,5 +24,7 @@
 #![allow(non_upper_case_globals)]
 
 mod mem;
+mod str_fns;
 
 pub use mem::*;
+pub use str_fns::*;
