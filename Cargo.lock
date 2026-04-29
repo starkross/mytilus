@@ -170,7 +170,6 @@ dependencies = [
 name = "mytilus-prng"
 version = "0.1.0"
 dependencies = [
- "mytilus-internal",
  "mytilus-sys",
 ]
 
