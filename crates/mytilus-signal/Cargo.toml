@@ -16,5 +16,8 @@ name = "mytilus_signal"
 
 [dependencies]
 mytilus-sys.path = "../mytilus-sys"
-mytilus-internal.path = "../mytilus-internal"
 mytilus-errno.path = "../mytilus-errno"
+# mytilus-internal returns when sigaction/sigprocmask arrive (they need
+# the libc lock + cancellation machinery). Phase 1 is pure sigset_t
+# bit-twiddling and only needs c types from mytilus-sys + errno's
+# __errno_location for sigaddset/sigdelset validation.
