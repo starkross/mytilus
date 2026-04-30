@@ -1,0 +1,105 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+# All jobs must complete green; keeps the gates in CI identical to what
+# `task ci` runs locally so contributors get matching signal pre-push.
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: 1
+  # Pretty colors in cargo output even though we redirect to GH log buffers.
+  CLICOLOR: 1
+
+jobs:
+  # ──────────────────────────────────────────────────────────────────────
+  # Formatting — fast feedback. No cargo deps needed; just rustfmt.
+  # ──────────────────────────────────────────────────────────────────────
+  fmt:
+    name: fmt
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+
+      # Picks up nightly + components from rust-toolchain.toml.
+      - uses: actions-rust-lang/setup-rust-toolchain@v1
+
+      - uses: arduino/setup-task@v2
+        with:
+          version: 3.x
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: task fmt:check
+        run: task fmt:check
+
+  # ──────────────────────────────────────────────────────────────────────
+  # Host-side: unit tests + clippy on the runner's native toolchain
+  # (x86_64-unknown-linux-gnu). Tests can't exercise the syscall path —
+  # syscall stubs panic with `unimplemented!()` outside aarch64-linux —
+  # but they cover all the pure / pointer / struct-layout code, which is
+  # the bulk of what we have so far. Real syscall coverage waits for
+  # `task test:qemu`.
+  # ──────────────────────────────────────────────────────────────────────
+  host:
+    name: host (test + clippy)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions-rust-lang/setup-rust-toolchain@v1
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          # Separate cache from `cross` because the target dir layout
+          # differs (host vs aarch64-unknown-linux-mytilus).
+          shared-key: host
+
+      - uses: arduino/setup-task@v2
+        with:
+          version: 3.x
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: task clippy:host
+        run: task clippy:host
+
+      - name: task test
+        run: task test
+
+  # ──────────────────────────────────────────────────────────────────────
+  # Cross-target: aarch64-unknown-linux-mytilus.
+  # Validates the real ship target via `cargo check` + `cargo clippy` +
+  # `cargo build` against the custom JSON spec, with -Z build-std for
+  # the no-prebuilt-sysroot custom target. This is the gate that catches
+  # ABI / target-spec / asm regressions before they hit `task build`.
+  # ──────────────────────────────────────────────────────────────────────
+  cross:
+    name: cross (aarch64-unknown-linux-mytilus)
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions-rust-lang/setup-rust-toolchain@v1
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: cross
+
+      - uses: arduino/setup-task@v2
+        with:
+          version: 3.x
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: task check
+        run: task check
+
+      - name: task clippy
+        run: task clippy
+
+      - name: task build
+        run: task build

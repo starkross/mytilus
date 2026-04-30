@@ -296,6 +296,36 @@ serde definitions. Fixed:
   classifies and sets errno. The same helper works for pointer-returning
   syscalls because `-1 as *mut c_void` is bit-identical to `MAP_FAILED`.
 
+### CI / GitHub Actions
+
+`.github/workflows/ci.yml` runs three parallel jobs on `ubuntu-latest`,
+all driven through the Taskfile so the local `task ci` command and CI
+exercise the same gates:
+
+- **fmt** — `task fmt:check`. No cargo deps required; super fast.
+- **host** — `task clippy:host` + `task test`. Caches the host target dir.
+  Tests can't exercise the syscall path (stubs panic outside aarch64-linux);
+  they cover all the pure / pointer / struct-layout code, which is the
+  bulk of what we have.
+- **cross** — `task check` + `task clippy` + `task build` against
+  `aarch64-unknown-linux-mytilus.json` with `-Z build-std`. Caches the
+  cross target dir separately. Catches ABI / target-spec / asm
+  regressions before they hit a real build.
+
+Rust toolchain is auto-installed from `rust-toolchain.toml` via
+`actions-rust-lang/setup-rust-toolchain@v1` (respects the `nightly-…` pin
+plus all components). `arduino/setup-task@v2` installs Task itself.
+`Swatinem/rust-cache@v2` provides the cargo registry / target cache.
+
+**Pre-existing Taskfile YAML bug fixed in this session**: `cmds:` items
+that were `- echo "TODO: …"` (with a literal `:` inside the unquoted
+YAML scalar) made Task's parser interpret the line as a map entry and
+fail with `invalid keys in command`. Fix: either single-quote the whole
+command (`- 'echo "..."'`) or replace the `:` with a different
+separator. Six such lines fixed across `test:qemu` / `symbols:list` /
+`symbols:diff` / `abi:diff` / `install` / `headers:install`. None had
+ever been run before, so the bug was latent.
+
 ### Open infrastructure questions
 
 - **No host integration testing for syscalls**: `task test:qemu` is the

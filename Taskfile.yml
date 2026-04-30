@@ -92,7 +92,7 @@ tasks:
   test:qemu:
     desc: Run target-side integration tests under qemu-user
     cmds:
-      - echo "TODO: wire qemu-aarch64 runner via cargo's runner config"
+      - 'echo "TODO: wire qemu-aarch64 runner via cargo runner config"'
 
   # ──────────────────────────────────────────────────────────────────────
   # ABI / symbol checks
@@ -102,17 +102,17 @@ tasks:
     desc: List exported symbols from the built libc.so
     deps: [build]
     cmds:
-      - echo "TODO: nm -D --defined-only target/{{.TARGET}}/release/libc.so"
+      - 'echo "TODO -- nm -D --defined-only target/{{.TARGET}}/release/libc.so"'
 
   symbols:diff:
     desc: Diff exported symbols vs. upstream musl
     cmds:
-      - echo "TODO: compare against ../musl built with the same toolchain"
+      - 'echo "TODO -- compare against ../musl built with the same toolchain"'
 
   abi:diff:
     desc: Run abidiff against upstream musl libc.so
     cmds:
-      - echo "TODO: abidiff --headers-dir1 ./headers --headers-dir2 ../musl/include ..."
+      - 'echo "TODO -- abidiff --headers-dir1 ./headers --headers-dir2 ../musl/include ..."'
 
   # ──────────────────────────────────────────────────────────────────────
   # Install / package
@@ -123,13 +123,13 @@ tasks:
     deps: [build]
     cmds:
       - mkdir -p {{.PREFIX}}/lib {{.PREFIX}}/include
-      - echo "TODO: copy artifacts into {{.PREFIX}}"
+      - 'echo "TODO -- copy artifacts into {{.PREFIX}}"'
 
   headers:install:
     desc: Install C headers into PREFIX/include
     cmds:
       - mkdir -p {{.PREFIX}}/include
-      - echo "TODO: copy headers/ into {{.PREFIX}}/include"
+      - 'echo "TODO -- copy headers/ into {{.PREFIX}}/include"'
 
   # ──────────────────────────────────────────────────────────────────────
   # Housekeeping

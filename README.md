@@ -1,5 +1,7 @@
 # mytilus
 
+[![CI](https://github.com/starkross/mytilus/actions/workflows/ci.yml/badge.svg)](https://github.com/starkross/mytilus/actions/workflows/ci.yml)
+
 A reimplementation of [musl libc](http://www.musl-libc.org/) (1.2.6) in Rust.
 
 > **Status: experimental — pre-alpha skeleton. Do not use.**
