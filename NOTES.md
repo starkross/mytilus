@@ -10,7 +10,8 @@ mem*, Phase 2 str*, Phase 3 search/tokenize/case), `mytilus-sys` syscall
 layer (`svc #0` asm + `ret` errno classifier), `mytilus-mman` (Phase 1: 12
 syscall wrappers), `mytilus-locale` (Phase 1: ctype subset),
 `mytilus-time` (Phase 1: clock/sleep syscall wrappers + `timespec`/
-`timeval` FFI structs), `mytilus-signal` (Phase 1: sigset_t bit-ops).
+`timeval` FFI structs), `mytilus-signal` (Phase 1: sigset_t bit-ops),
+`mytilus-stdlib` (Phase 1: abs/div/qsort/bsearch — first callback FFI).
 
 ### Workspace conventions discovered/locked-in
 
@@ -79,6 +80,24 @@ syscall wrappers), `mytilus-locale` (Phase 1: ctype subset),
   the future `stat`/`pthread_attr_t`/etc.) gets a layout test using
   `core::mem::{size_of, align_of, offset_of}`. Drift here silently
   corrupts every caller; a clean unit-test signal is cheap insurance.
+- **Callback FFI shape**: `extern "C" fn(*const c_void, *const c_void)
+  -> c_int` for 2-arg comparators (qsort/bsearch),
+  `extern "C" fn(*const c_void, *const c_void, *mut c_void) -> c_int`
+  for the 3-arg `_r` form. Same shape `pthread_create`'s start-routine
+  (`extern "C" fn(*mut c_void) -> *mut c_void`) and `atexit`/`tss_create`
+  destructors will use. `qsort` adapts its 2-arg cmp to the 3-arg
+  heapsort by passing the function pointer itself through `ctx` and
+  using `core::mem::transmute` to round-trip data ↔ function pointers
+  (sound on aarch64 LP64 because both are 64-bit).
+- **Struct return by value across the C ABI**: `div_t`/`ldiv_t`/
+  `lldiv_t`/`imaxdiv_t` are returned by value from `div`/`ldiv`/etc.
+  `extern "C" fn(...) -> div_t` Just Works in Rust — the AArch64 PCS
+  passes small POD structs (≤16 bytes) in `x0`/`x1`. Verified by the
+  layout tests; no special handling needed.
+- **`a.wrapping_neg()` for `abs(INT_MIN)`**: Rust's `-a` panics in debug
+  mode on `i32::MIN` (overflow). C's `-a` is implementation-defined and
+  works out to `INT_MIN` on 2's-complement. Use `wrapping_neg()` to
+  match the observable upstream behavior without panicking.
 
 ### LLVM / codegen gotchas
 
@@ -225,6 +244,32 @@ serde definitions. Fixed:
   trampoline, `siginfo_t`, real-time signal support, `sigsuspend`,
   `sigwait*`. Those all need real syscalls plus the cancellation/thread
   machinery.
+
+#### `mytilus-stdlib`
+- Phase 1 ports `abs`/`labs`/`llabs`/`imaxabs`, `div`/`ldiv`/`lldiv`/
+  `imaxdiv`, `qsort`/`qsort_r`, `bsearch` (11 C-ABI symbols) plus the
+  `div_t`/`ldiv_t`/`lldiv_t`/`imaxdiv_t` return-by-value structs.
+- **`qsort` is heapsort, NOT smoothsort**. Upstream uses smoothsort
+  (~230 LOC of Leonardo-heap state-machine code) for its near-O(n)
+  behavior on already-sorted input; we use plain heapsort (~50 LOC,
+  same O(n log n) worst case, in-place, allocation-free). Tagged
+  `TODO(perf)` to swap in upstream's smoothsort once a bench harness
+  shows it matters. Public ABI is unchanged either way.
+- `qsort_r` is the canonical 3-arg-cmp form; `qsort` adapts to it via
+  a static `qsort_2to3_adapter` that recovers the original 2-arg cmp
+  pointer from `ctx` via `core::mem::transmute`. Standard libc trick;
+  sound on aarch64 LP64 because data and function pointers are both
+  64-bit.
+- `swap_bytes` is a byte-by-byte loop. Tagged `TODO(perf)` to upgrade
+  to word-stride / chunked-buffer swap (10–100× faster for wide
+  elements). Currently fine for correctness.
+- `intmax_t` aliased locally to `i64` since `mytilus-sys::ctypes`
+  doesn't have it. Promote to a shared alias when another consumer
+  needs it.
+- Deferred to later phases (need malloc / env / stdio / string parsing):
+  `strtol` family, `atoi`/`atol`/`atoll`, `strtod`/`atof`, env
+  (`getenv`/`setenv`/`putenv`/`unsetenv`), exit/atexit, `mblen` family,
+  `realpath`, `mkstemp`/`mkdtemp`, `system`.
 
 #### `mytilus-mman`
 - `__vm_wait()` is not called on `MAP_FIXED` / `MREMAP_FIXED`.
