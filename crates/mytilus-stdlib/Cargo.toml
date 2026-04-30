@@ -16,7 +16,7 @@ name = "mytilus_stdlib"
 
 [dependencies]
 mytilus-sys.path = "../mytilus-sys"
-mytilus-internal.path = "../mytilus-internal"
-mytilus-errno.path = "../mytilus-errno"
-mytilus-string.path = "../mytilus-string"
-mytilus-malloc.path = "../mytilus-malloc"
+# Other deps (mytilus-internal, mytilus-errno, mytilus-string, mytilus-malloc)
+# return when the strtol family / env / exit / atexit lands. Phase 1 ports
+# only the allocation-free integer + sort/search subset and needs only the
+# c types from mytilus-sys.
