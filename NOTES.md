@@ -11,7 +11,9 @@ layer (`svc #0` asm + `ret` errno classifier), `mytilus-mman` (Phase 1: 12
 syscall wrappers), `mytilus-locale` (Phase 1: ctype subset),
 `mytilus-time` (Phase 1: clock/sleep syscall wrappers + `timespec`/
 `timeval` FFI structs), `mytilus-signal` (Phase 1: sigset_t bit-ops),
-`mytilus-stdlib` (Phase 1: abs/div/qsort/bsearch — first callback FFI).
+`mytilus-stdlib` (Phase 1: abs/div/qsort/bsearch — first callback FFI),
+`mytilus-fcntl` (Phase 1: open/openat/creat/fcntl/posix_fadvise/posix_fallocate
+— first variadic FFI), CI workflow.
 
 ### Workspace conventions discovered/locked-in
 
@@ -98,6 +100,18 @@ syscall wrappers), `mytilus-locale` (Phase 1: ctype subset),
   mode on `i32::MIN` (overflow). C's `-a` is implementation-defined and
   works out to `INT_MIN` on 2's-complement. Use `wrapping_neg()` to
   match the observable upstream behavior without panicking.
+- **Variadic FFI (`#![feature(c_variadic)]`)**: declare the function with
+  trailing `mut args: ...`, then `args.arg::<T>()` extracts one variadic
+  slot at a time. Default argument promotion still applies on the C side
+  (types narrower than `int` promote to `int`; `float` promotes to
+  `double`); on Rust's side we just pass the post-promotion type to
+  `arg::<T>()`. `mode_t = u32 = c_uint` is already int-width so no
+  promotion needed. `unsigned long` (`fcntl`'s arg slot) is `c_ulong`.
+  Verified by inspection: variadic functions emit a ~192-byte prologue
+  on AArch64 that spills x0..x7 (64 B) and q0..q3 (64 B) into a "variadic
+  register save area" per AAPCS64. No libc helpers (`__va_arg` etc.) get
+  pulled in — pure inline lowering. The 192 B is acceptable overhead for
+  syscall wrappers; worth knowing for hot variadics like `printf`.
 
 ### LLVM / codegen gotchas
 
@@ -163,8 +177,8 @@ serde definitions. Fixed:
   recognise the exact PC range. Belongs in
   `mytilus-thread/src/asm/syscall_cp.S` per PLAN.md.
 - Syscall-number constants: populated lazily in `nr.rs` as consumers
-  arrive. After this session: 11 mman NRs + 6 time NRs. We deliberately
-  avoid pre-populating the full ~300-entry table.
+  arrive. After this session: 11 mman NRs + 6 time NRs + 5 fcntl NRs
+  (= 22). We deliberately avoid pre-populating the full ~300-entry table.
 - `task test:qemu` is required to actually run anything that hits a real
   syscall; pre-existing TODO in the Taskfile.
 
@@ -270,6 +284,37 @@ serde definitions. Fixed:
   `strtol` family, `atoi`/`atol`/`atoll`, `strtod`/`atof`, env
   (`getenv`/`setenv`/`putenv`/`unsetenv`), exit/atexit, `mblen` family,
   `realpath`, `mkstemp`/`mkdtemp`, `system`.
+
+#### `mytilus-fcntl`
+- Phase 1 ports `open`, `openat`, `creat`, `fcntl`, `posix_fadvise`,
+  `posix_fallocate` (6 C-ABI symbols). Three of them (`open`, `openat`,
+  `fcntl`) are **C-variadic**.
+- **AArch64 specialization**: kernel has no `SYS_open`. `open(path, …)`
+  routes through `openat(AT_FDCWD, …)`. Both `open` and `openat` share
+  an internal `openat_inner` helper.
+- **`O_LARGEFILE` is OR-ed in unconditionally**: the kernel ignores it
+  on 64-bit, but C callers expect a 64-bit-aware handle so we mirror
+  upstream and OR it in for both `openat_inner` and `fcntl(F_SETFL)`.
+- **`O_CLOEXEC` belt-and-suspenders**: even though the kernel honors
+  `O_CLOEXEC` on `openat` since 2.6.23, we also re-apply
+  `fcntl(fd, F_SETFD, FD_CLOEXEC)` after a successful open with
+  `O_CLOEXEC`. Mirrors upstream — defends against weird old kernels and
+  is essentially free on modern ones.
+- **`posix_fadvise`/`posix_fallocate` return positive errno**: same
+  POSIX gotcha as `clock_nanosleep`. Their impl uses `-r as c_int`
+  rather than `ret(r)`. Mis-porting silently breaks every caller.
+- Two upstream workarounds **dropped** in `fcntl`:
+  - `F_GETOWN → F_GETOWN_EX` translation (upstream uses to disambiguate
+    process-group returns from errors). We pass `F_GETOWN` directly.
+    Tagged `TODO(compat)`.
+  - `F_DUPFD_CLOEXEC` → `F_DUPFD + F_SETFD` fallback (for kernels lacking
+    the cloexec variant). We pass through. Tagged `TODO(compat)`.
+- **`TODO(thread/cancel)`**: `open`/`openat`/`fcntl(F_SETLKW)` are
+  cancellation points upstream (use `__syscall_cp`). We use plain `svc`.
+  Switch when `mytilus-thread`'s asm lands.
+- 7 NRs added to `mytilus-sys::nr`: `SYS_fcntl`, `SYS_fallocate`,
+  `SYS_openat`, `SYS_close`, `SYS_fadvise64` (5 new this round; 2
+  previously).
 
 #### `mytilus-mman`
 - `__vm_wait()` is not called on `MAP_FIXED` / `MREMAP_FIXED`.
