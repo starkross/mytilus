@@ -8,7 +8,9 @@ isn't obvious from the code or commit history.
 Session covered: `mytilus-errno`, `mytilus-prng`, `mytilus-string` (Phase 1
 mem*, Phase 2 str*, Phase 3 search/tokenize/case), `mytilus-sys` syscall
 layer (`svc #0` asm + `ret` errno classifier), `mytilus-mman` (Phase 1: 12
-syscall wrappers), `mytilus-locale` (Phase 1: ctype subset).
+syscall wrappers), `mytilus-locale` (Phase 1: ctype subset),
+`mytilus-time` (Phase 1: clock/sleep syscall wrappers + `timespec`/
+`timeval` FFI structs), `mytilus-signal` (Phase 1: sigset_t bit-ops).
 
 ### Workspace conventions discovered/locked-in
 
@@ -59,6 +61,24 @@ syscall wrappers), `mytilus-locale` (Phase 1: ctype subset).
   `mytilus-string → mytilus-locale`. The future `setlocale` port will
   need to either inline its own minimal byte-loops, or move ctype to
   `mytilus-internal`, before re-adding `mytilus-string` as a dep.
+  Same pattern repeated when porting `mytilus-time` and `mytilus-signal` —
+  each scaffold listed several anticipatory deps that get trimmed back
+  to `mytilus-sys` (+ `mytilus-errno` if the crate sets errno).
+- **`<<` after `as <type>` is parsed as generics, not shift**: `1 as
+  c_ulong << shift` is a compile error ("interpreted as start of generic
+  arguments for `c_ulong`"). Always parenthesize: `(1 as c_ulong) <<
+  shift`. Hit while porting `bit_index` in `mytilus-signal`.
+- **Inline-asm constraint syntax**: `inlateout("x0") arg => ret`
+  declares a register that's both input (with value `arg`) and output
+  (writing into `ret`); we use this for syscall return slots where the
+  same register holds the syscall arg in and the result out. The
+  alternative `inout("x0") val` overwrites `val` in-place, which is
+  fine when the caller doesn't need the original value back.
+- **FFI struct layout asserted in tests**: every `#[repr(C)]` struct
+  that crosses the syscall boundary (`timespec`, `timeval`, `sigset_t`,
+  the future `stat`/`pthread_attr_t`/etc.) gets a layout test using
+  `core::mem::{size_of, align_of, offset_of}`. Drift here silently
+  corrupts every caller; a clean unit-test signal is cheap insurance.
 
 ### LLVM / codegen gotchas
 
@@ -123,9 +143,9 @@ serde definitions. Fixed:
   here. Must remain handwritten assembly so the cancel handler can
   recognise the exact PC range. Belongs in
   `mytilus-thread/src/asm/syscall_cp.S` per PLAN.md.
-- Syscall-number constants: only the mman-related ones are populated in
-  `nr.rs`. New ones land lazily as each consumer needs them; we
-  deliberately avoid pre-populating the full ~300-entry table.
+- Syscall-number constants: populated lazily in `nr.rs` as consumers
+  arrive. After this session: 11 mman NRs + 6 time NRs. We deliberately
+  avoid pre-populating the full ~300-entry table.
 - `task test:qemu` is required to actually run anything that hits a real
   syscall; pre-existing TODO in the Taskfile.
 
@@ -148,6 +168,63 @@ serde definitions. Fixed:
 - Bit-twiddling tricks ported verbatim from musl
   (`((unsigned)c|32)-'a' < 26` style) rather than using a 256-entry
   lookup table. Bit-identical results to upstream.
+
+#### `mytilus-time`
+- Phase 1 ports the syscall wrappers only: `clock_gettime`/`__clock_gettime`,
+  `clock_settime`, `clock_getres`, `clock_nanosleep`/`__clock_nanosleep`,
+  `nanosleep`, `gettimeofday`, `time` (9 C-ABI symbols).
+- `timespec` and `timeval` are defined here as `#[repr(C)]` structs and
+  re-used by everyone else (mytilus-thread for `pthread_*_timedwait`,
+  mytilus-net for `SO_RCVTIMEO`, future stdio, etc.).
+- **`clock_nanosleep` returns errno DIRECTLY** (positive on failure, 0 on
+  success), NOT the standard `-1 + errno-set` convention. Its impl uses
+  `-r as c_int` rather than `ret(r)`. `nanosleep` then negates and runs
+  through `ret` to translate to the standard convention. Mis-porting this
+  would silently break every caller.
+- The cross-target codegen for `nanosleep` shows the win: LLVM inlined
+  `__clock_nanosleep` into it, so `nanosleep` is one `svc` plus errno
+  classification — no indirect call.
+- `TODO(perf, vDSO)`: upstream `clock_gettime` tries the kernel-provided
+  vDSO (`__kernel_clock_gettime`) first and falls back to `svc`. We
+  always go through `svc`. Wiring vDSO needs an auxv reader from
+  `mytilus-startup` to find the vDSO base.
+- `TODO(thread/cancel)`: `clock_nanosleep`/`nanosleep` use plain `svc`,
+  not `__syscall_cp`. Switch when `mytilus-thread`'s asm lands.
+- Deferred to later phases: `mktime`, `gmtime`, `localtime`, `strftime`,
+  `strptime`, `ctime`, `asctime`, `difftime`, `timer_*`, TZif parser,
+  `__tz` machinery — all need malloc, fcntl, or substantial table data.
+
+#### `mytilus-signal`
+- Phase 1 ports just the **sigset_t bit-manipulators**: `sigemptyset`,
+  `sigfillset`, `sigaddset`, `sigdelset`, `sigismember`, `sigorset`,
+  `sigandset`, `sigisemptyset` (8 C-ABI symbols). Pure bit-twiddling on
+  a fixed 128-byte struct, no syscalls.
+- `sigset_t` shape (kernel ABI): `struct { unsigned long __bits[16]; }`
+  on LP64 = 128 bytes. Only `__bits[0]` (one `u64`) carries real signal
+  bits — the remaining 120 bytes are reserved padding for future
+  signals. `SST_SIZE` (loop count for sigorset/sigandset/sigisemptyset)
+  is 1 on our target.
+- **Three reserved signals**: `sigaddset`/`sigdelset` reject signals
+  32, 33, 34 with `EINVAL`. musl uses these internally:
+  - 32 = `SIGCANCEL` (pthread_cancel)
+  - 33 = `SIGSYNCCALL` (synchronous broadcast across threads)
+  - 34 = reserved for `setxid` / future use
+  `sigfillset`'s magic constant `0xfffffffc7fffffff` masks out these
+  three bits. `sigismember` does NOT reject reserved signals — apps can
+  still query whether they're set.
+- `sigemptyset` upstream only zeroes `__bits[0]` on LP64+_NSIG=65 (the
+  `_NSIG > 65` path is dead). We mirror that: callers must always
+  zero-init themselves before passing if they care about the upper
+  120 bytes.
+- This is the canonical `sigset_t` that `sigaction`, `sigprocmask`,
+  `pthread_sigmask`, `sigtimedwait`, etc. will all consume — locking
+  the layout in early matters.
+- Deferred to later phases: signal-handler installation (`sigaction`,
+  `signal`, `bsd_signal`), masking (`sigprocmask`, `pthread_sigmask`),
+  delivery (`raise`, `kill`, `tkill`, `tgkill`), the `restore`
+  trampoline, `siginfo_t`, real-time signal support, `sigsuspend`,
+  `sigwait*`. Those all need real syscalls plus the cancellation/thread
+  machinery.
 
 #### `mytilus-mman`
 - `__vm_wait()` is not called on `MAP_FIXED` / `MREMAP_FIXED`.
