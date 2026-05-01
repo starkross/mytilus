@@ -16,7 +16,8 @@ syscall wrappers), `mytilus-locale` (Phase 1: ctype subset),
 — first variadic FFI), CI workflow,
 `mytilus-unistd` (Phase 1: sleep/usleep/pause/dup family/getpagesize/sync
 family — first cross-crate-symbol consumer), workspace-wide symbol-gating
-refactor (`cfg(not(test)) → cfg(target_env = "musl")`).
+refactor (`cfg(not(test)) → cfg(target_env = "musl")`),
+`mytilus-startup` (Phase 1: setjmp/longjmp + first handwritten asm).
 
 ### Workspace conventions discovered/locked-in
 
@@ -110,6 +111,17 @@ refactor (`cfg(not(test)) → cfg(target_env = "musl")`).
   mode on `i32::MIN` (overflow). C's `-a` is implementation-defined and
   works out to `INT_MIN` on 2's-complement. Use `wrapping_neg()` to
   match the observable upstream behavior without panicking.
+- **Handwritten assembly via `core::arch::global_asm!`**: rather than a
+  `build.rs` + `cc`-crate setup (which would need a crates.io build-dep,
+  forbidden by workspace policy), include `.s` files directly via
+  `core::arch::global_asm!(include_str!("../asm/foo.s"))`. LLVM's
+  integrated assembler handles ELF AArch64 GAS syntax natively. Cargo's
+  normal change detection picks up edits to the `.s` file because it's
+  part of the include-tree. The `global_asm!` invocation must be
+  cfg-gated to the cross target (`cfg(all(target_arch = "aarch64",
+  target_os = "linux"))`) — otherwise host builds fail to assemble
+  aarch64-only mnemonics. Same pattern works for every future `.S`
+  port (memcpy.S, memset.S, syscall_cp.S, dlstart, clone.s).
 - **Variadic FFI (`#![feature(c_variadic)]`)**: declare the function with
   trailing `mut args: ...`, then `args.arg::<T>()` extracts one variadic
   slot at a time. Default argument promotion still applies on the C side
@@ -294,6 +306,36 @@ serde definitions. Fixed:
   `strtol` family, `atoi`/`atol`/`atoll`, `strtod`/`atof`, env
   (`getenv`/`setenv`/`putenv`/`unsetenv`), exit/atexit, `mblen` family,
   `realpath`, `mkstemp`/`mkdtemp`, `system`.
+
+#### `mytilus-startup`
+- Phase 1 ports `setjmp` / `_setjmp` / `__setjmp` / `longjmp` / `_longjmp`
+  (5 C-ABI symbols, all asm-defined). Plus the `__jmp_buf` /
+  `__jmp_buf_tag` / `jmp_buf` / `sigjmp_buf` types.
+- **First handwritten assembly in the workspace**. Asm files live at
+  `crates/mytilus-startup/asm/{setjmp,longjmp}.s`, brought in via
+  `core::arch::global_asm!(include_str!(…))` cfg-gated to
+  aarch64-linux. Verbatim ports from upstream
+  `arch/aarch64/{setjmp,longjmp}.s` — bit-identical disassembly.
+- **`jmp_buf` shape** on aarch64 LP64:
+  - `__jmp_buf` = `[u64; 22]` = 176 bytes (callee-saved register save
+    area: x19/20, x21/22, x23/24, x25/26, x27/28, x29/30, sp, d8/9,
+    d10/11, d12/13, d14/15).
+  - `__jmp_buf_tag` = `__jb (176) + __fl (8) + __ss (128)` = 312 bytes
+    total. `__fl` and `__ss` are for `sigsetjmp`/`siglongjmp`'s signal
+    mask save; plain setjmp/longjmp don't touch them.
+  - `jmp_buf` = `__jmp_buf_tag[1]` so it pointer-decays in C.
+- **`longjmp(env, 0)` returns 1**: enforced by the `csinc w0, w1, wzr,
+  ne` instruction — when `w1 == 0`, the conditional-select-increment
+  picks the successor of `wzr` (i.e., 1), otherwise it passes `w1`
+  through. Standard libc behavior.
+- Deferred to later phases: `sigsetjmp` / `siglongjmp` (need
+  `pthread_sigmask` and the `__fl`/`__ss` save logic), `crt1` /
+  `crti` / `crtn` / `Scrt1` / `rcrt1`, `__libc_start_main`, the auxv
+  reader, environment array. All need much more infrastructure
+  (mytilus-thread, mytilus-mman wired at startup, ldso handoff).
+- The `cc`-crate / `build.rs` route was deliberately rejected:
+  workspace policy forbids crates.io build-deps. `global_asm!` gives
+  the same effect with zero deps.
 
 #### `mytilus-unistd`
 - Phase 1 ports `sleep`, `usleep`, `pause`, `dup`, `dup2`, `dup3` /
