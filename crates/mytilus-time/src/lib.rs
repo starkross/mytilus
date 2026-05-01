@@ -90,7 +90,7 @@ pub const TIMER_ABSTIME: c_int = 1;
 ///
 /// # Safety
 /// `ts` must point to a writable `timespec`.
-#[cfg_attr(not(test), no_mangle)]
+#[cfg_attr(target_env = "musl", no_mangle)]
 pub unsafe extern "C" fn __clock_gettime(clk: clockid_t, ts: *mut timespec) -> c_int {
     // SAFETY: forwards to the kernel; `ts` is asserted writable by the caller.
     let r = unsafe { syscall2(SYS_clock_gettime, clk as c_long, ts as c_long) };
@@ -100,7 +100,7 @@ pub unsafe extern "C" fn __clock_gettime(clk: clockid_t, ts: *mut timespec) -> c
 
 /// # Safety
 /// See [`__clock_gettime`].
-#[cfg_attr(not(test), no_mangle)]
+#[cfg_attr(target_env = "musl", no_mangle)]
 pub unsafe extern "C" fn clock_gettime(clk: clockid_t, ts: *mut timespec) -> c_int {
     // SAFETY: forwarded.
     unsafe { __clock_gettime(clk, ts) }
@@ -110,7 +110,7 @@ pub unsafe extern "C" fn clock_gettime(clk: clockid_t, ts: *mut timespec) -> c_i
 ///
 /// # Safety
 /// `ts` must point to a readable `timespec`.
-#[cfg_attr(not(test), no_mangle)]
+#[cfg_attr(target_env = "musl", no_mangle)]
 pub unsafe extern "C" fn clock_settime(clk: clockid_t, ts: *const timespec) -> c_int {
     // SAFETY: forwards to the kernel.
     let r = unsafe { syscall2(SYS_clock_settime, clk as c_long, ts as c_long) };
@@ -122,7 +122,7 @@ pub unsafe extern "C" fn clock_settime(clk: clockid_t, ts: *const timespec) -> c
 ///
 /// # Safety
 /// `ts` may be NULL (in which case the kernel just validates `clk`).
-#[cfg_attr(not(test), no_mangle)]
+#[cfg_attr(target_env = "musl", no_mangle)]
 pub unsafe extern "C" fn clock_getres(clk: clockid_t, ts: *mut timespec) -> c_int {
     // SAFETY: forwards to the kernel.
     let r = unsafe { syscall2(SYS_clock_getres, clk as c_long, ts as c_long) };
@@ -148,7 +148,7 @@ pub unsafe extern "C" fn clock_getres(clk: clockid_t, ts: *mut timespec) -> c_in
 /// # Safety
 /// `req` must point to a readable `timespec`. `rem` may be NULL or point to
 /// a writable `timespec`.
-#[cfg_attr(not(test), no_mangle)]
+#[cfg_attr(target_env = "musl", no_mangle)]
 pub unsafe extern "C" fn __clock_nanosleep(
     clk: clockid_t,
     flags: c_int,
@@ -177,7 +177,7 @@ pub unsafe extern "C" fn __clock_nanosleep(
 
 /// # Safety
 /// See [`__clock_nanosleep`].
-#[cfg_attr(not(test), no_mangle)]
+#[cfg_attr(target_env = "musl", no_mangle)]
 pub unsafe extern "C" fn clock_nanosleep(
     clk: clockid_t,
     flags: c_int,
@@ -196,7 +196,7 @@ pub unsafe extern "C" fn clock_nanosleep(
 /// # Safety
 /// `req` must point to a readable `timespec`. `rem` may be NULL or point to
 /// a writable `timespec`.
-#[cfg_attr(not(test), no_mangle)]
+#[cfg_attr(target_env = "musl", no_mangle)]
 pub unsafe extern "C" fn nanosleep(req: *const timespec, rem: *mut timespec) -> c_int {
     // Upstream: __syscall_ret(-__clock_nanosleep(CLOCK_REALTIME, 0, req, rem)).
     // clock_nanosleep returns positive errno on failure; negate to put it
@@ -219,7 +219,7 @@ pub unsafe extern "C" fn nanosleep(req: *const timespec, rem: *mut timespec) -> 
 ///
 /// # Safety
 /// `tv` may be NULL or point to a writable `timeval`.
-#[cfg_attr(not(test), no_mangle)]
+#[cfg_attr(target_env = "musl", no_mangle)]
 pub unsafe extern "C" fn gettimeofday(tv: *mut timeval, _tz: *mut c_void) -> c_int {
     if tv.is_null() {
         return 0;
@@ -241,7 +241,7 @@ pub unsafe extern "C" fn gettimeofday(tv: *mut timeval, _tz: *mut c_void) -> c_i
 ///
 /// # Safety
 /// `t` may be NULL or point to a writable `time_t`.
-#[cfg_attr(not(test), no_mangle)]
+#[cfg_attr(target_env = "musl", no_mangle)]
 pub unsafe extern "C" fn time(t: *mut time_t) -> time_t {
     let mut ts = timespec {
         tv_sec: 0,

@@ -159,7 +159,7 @@ extern "C" fn qsort_2to3_adapter(a: *const c_void, b: *const c_void, ctx: *mut c
 /// # Safety
 /// `base` must be a valid array of `nel` elements of `width` bytes each.
 /// `cmp` must be a valid C-ABI function pointer.
-#[cfg_attr(not(test), no_mangle)]
+#[cfg_attr(target_env = "musl", no_mangle)]
 pub unsafe extern "C" fn qsort(base: *mut c_void, nel: size_t, width: size_t, cmp: CmpFn) {
     // SAFETY: stuff the 2-arg comparator into the ctx slot of qsort_r.
     unsafe {
@@ -175,7 +175,7 @@ pub unsafe extern "C" fn qsort(base: *mut c_void, nel: size_t, width: size_t, cm
 /// # Safety
 /// See [`qsort`]. `cmp` may use `ctx` however it wants; we just pass it
 /// through.
-#[cfg_attr(not(test), no_mangle)]
+#[cfg_attr(target_env = "musl", no_mangle)]
 pub unsafe extern "C" fn qsort_r(
     base: *mut c_void,
     nel: size_t,
@@ -196,7 +196,7 @@ pub unsafe extern "C" fn qsort_r(
 /// # Safety
 /// `base` must be a valid array of `nel` elements of `width` bytes each.
 /// `cmp` must be a valid C-ABI function pointer.
-#[cfg_attr(not(test), no_mangle)]
+#[cfg_attr(target_env = "musl", no_mangle)]
 pub unsafe extern "C" fn bsearch(
     key: *const c_void,
     base: *const c_void,

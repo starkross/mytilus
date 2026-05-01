@@ -21,7 +21,7 @@ use mytilus_sys::ctypes::{c_char, c_int, c_void, size_t};
 ///
 /// # Safety
 /// `s` must point to a NUL-terminated C string.
-#[cfg_attr(not(test), no_mangle)]
+#[cfg_attr(target_env = "musl", no_mangle)]
 pub unsafe extern "C" fn strlen(s: *const c_char) -> size_t {
     // SAFETY: caller guarantees s is NUL-terminated; we read forward until
     // the first 0 byte.
@@ -38,7 +38,7 @@ pub unsafe extern "C" fn strlen(s: *const c_char) -> size_t {
 ///
 /// # Safety
 /// `s` must point to at least `n` readable bytes.
-#[cfg_attr(not(test), no_mangle)]
+#[cfg_attr(target_env = "musl", no_mangle)]
 pub unsafe extern "C" fn strnlen(s: *const c_char, n: size_t) -> size_t {
     // SAFETY: caller guarantees s is valid for n bytes; bounded scan.
     unsafe {
@@ -58,7 +58,7 @@ pub unsafe extern "C" fn strnlen(s: *const c_char, n: size_t) -> size_t {
 ///
 /// # Safety
 /// `src` must be valid for `n` bytes.
-#[cfg_attr(not(test), no_mangle)]
+#[cfg_attr(target_env = "musl", no_mangle)]
 pub unsafe extern "C" fn memchr(src: *const c_void, c: c_int, n: size_t) -> *mut c_void {
     let s = src as *const u8;
     let target = c as u8;
@@ -79,7 +79,7 @@ pub unsafe extern "C" fn memchr(src: *const c_void, c: c_int, n: size_t) -> *mut
 ///
 /// # Safety
 /// `src` must be valid for `n` bytes.
-#[cfg_attr(not(test), no_mangle)]
+#[cfg_attr(target_env = "musl", no_mangle)]
 pub unsafe extern "C" fn __memrchr(src: *const c_void, c: c_int, n: size_t) -> *mut c_void {
     let s = src as *const u8;
     let target = c as u8;
@@ -99,7 +99,7 @@ pub unsafe extern "C" fn __memrchr(src: *const c_void, c: c_int, n: size_t) -> *
 
 /// # Safety
 /// See `__memrchr`.
-#[cfg_attr(not(test), no_mangle)]
+#[cfg_attr(target_env = "musl", no_mangle)]
 pub unsafe extern "C" fn memrchr(src: *const c_void, c: c_int, n: size_t) -> *mut c_void {
     // SAFETY: forwarded.
     unsafe { __memrchr(src, c, n) }
@@ -115,7 +115,7 @@ pub unsafe extern "C" fn memrchr(src: *const c_void, c: c_int, n: size_t) -> *mu
 ///
 /// # Safety
 /// `s` must be NUL-terminated.
-#[cfg_attr(not(test), no_mangle)]
+#[cfg_attr(target_env = "musl", no_mangle)]
 pub unsafe extern "C" fn __strchrnul(s: *const c_char, c: c_int) -> *mut c_char {
     let target = c as u8;
     // SAFETY: caller guarantees s is NUL-terminated.
@@ -134,7 +134,7 @@ pub unsafe extern "C" fn __strchrnul(s: *const c_char, c: c_int) -> *mut c_char 
 
 /// # Safety
 /// See `__strchrnul`.
-#[cfg_attr(not(test), no_mangle)]
+#[cfg_attr(target_env = "musl", no_mangle)]
 pub unsafe extern "C" fn strchrnul(s: *const c_char, c: c_int) -> *mut c_char {
     // SAFETY: forwarded.
     unsafe { __strchrnul(s, c) }
@@ -144,7 +144,7 @@ pub unsafe extern "C" fn strchrnul(s: *const c_char, c: c_int) -> *mut c_char {
 ///
 /// # Safety
 /// `s` must be NUL-terminated.
-#[cfg_attr(not(test), no_mangle)]
+#[cfg_attr(target_env = "musl", no_mangle)]
 pub unsafe extern "C" fn strchr(s: *const c_char, c: c_int) -> *mut c_char {
     // SAFETY: __strchrnul returns a pointer into the same buffer; if it
     // matched the requested byte, return it; otherwise NULL.
@@ -162,7 +162,7 @@ pub unsafe extern "C" fn strchr(s: *const c_char, c: c_int) -> *mut c_char {
 ///
 /// # Safety
 /// `s` must be NUL-terminated.
-#[cfg_attr(not(test), no_mangle)]
+#[cfg_attr(target_env = "musl", no_mangle)]
 pub unsafe extern "C" fn strrchr(s: *const c_char, c: c_int) -> *mut c_char {
     // SAFETY: scan the entire string including its terminator (the +1) so
     // strrchr(s, 0) finds the NUL.
@@ -180,7 +180,7 @@ pub unsafe extern "C" fn strrchr(s: *const c_char, c: c_int) -> *mut c_char {
 ///
 /// # Safety
 /// Both pointers must be NUL-terminated.
-#[cfg_attr(not(test), no_mangle)]
+#[cfg_attr(target_env = "musl", no_mangle)]
 pub unsafe extern "C" fn strcmp(l: *const c_char, r: *const c_char) -> c_int {
     // SAFETY: caller guarantees both strings are NUL-terminated; we walk
     // until we find a difference or hit a terminator.
@@ -201,7 +201,7 @@ pub unsafe extern "C" fn strcmp(l: *const c_char, r: *const c_char) -> c_int {
 ///
 /// # Safety
 /// Both pointers must be valid for `min(n, strlen+1)` bytes.
-#[cfg_attr(not(test), no_mangle)]
+#[cfg_attr(target_env = "musl", no_mangle)]
 pub unsafe extern "C" fn strncmp(l: *const c_char, r: *const c_char, mut n: size_t) -> c_int {
     if n == 0 {
         return 0;
@@ -230,7 +230,7 @@ pub unsafe extern "C" fn strncmp(l: *const c_char, r: *const c_char, mut n: size
 ///
 /// # Safety
 /// `d` must be writable for `strlen(s) + 1` bytes; regions must not overlap.
-#[cfg_attr(not(test), no_mangle)]
+#[cfg_attr(target_env = "musl", no_mangle)]
 pub unsafe extern "C" fn __stpcpy(mut d: *mut c_char, mut s: *const c_char) -> *mut c_char {
     // SAFETY: caller guarantees the destination is large enough.
     unsafe {
@@ -247,7 +247,7 @@ pub unsafe extern "C" fn __stpcpy(mut d: *mut c_char, mut s: *const c_char) -> *
 
 /// # Safety
 /// See `__stpcpy`.
-#[cfg_attr(not(test), no_mangle)]
+#[cfg_attr(target_env = "musl", no_mangle)]
 pub unsafe extern "C" fn stpcpy(d: *mut c_char, s: *const c_char) -> *mut c_char {
     // SAFETY: forwarded.
     unsafe { __stpcpy(d, s) }
@@ -257,7 +257,7 @@ pub unsafe extern "C" fn stpcpy(d: *mut c_char, s: *const c_char) -> *mut c_char
 ///
 /// # Safety
 /// See `__stpcpy`.
-#[cfg_attr(not(test), no_mangle)]
+#[cfg_attr(target_env = "musl", no_mangle)]
 pub unsafe extern "C" fn strcpy(d: *mut c_char, s: *const c_char) -> *mut c_char {
     // SAFETY: forwarded.
     unsafe {
@@ -274,7 +274,7 @@ pub unsafe extern "C" fn strcpy(d: *mut c_char, s: *const c_char) -> *mut c_char
 /// # Safety
 /// `d` must be writable for `n` bytes; `s` must be readable up to the first
 /// NUL or `n` bytes, whichever comes first.
-#[cfg_attr(not(test), no_mangle)]
+#[cfg_attr(target_env = "musl", no_mangle)]
 pub unsafe extern "C" fn __stpncpy(
     mut d: *mut c_char,
     mut s: *const c_char,
@@ -305,7 +305,7 @@ pub unsafe extern "C" fn __stpncpy(
 
 /// # Safety
 /// See `__stpncpy`.
-#[cfg_attr(not(test), no_mangle)]
+#[cfg_attr(target_env = "musl", no_mangle)]
 pub unsafe extern "C" fn stpncpy(d: *mut c_char, s: *const c_char, n: size_t) -> *mut c_char {
     // SAFETY: forwarded.
     unsafe { __stpncpy(d, s, n) }
@@ -315,7 +315,7 @@ pub unsafe extern "C" fn stpncpy(d: *mut c_char, s: *const c_char, n: size_t) ->
 ///
 /// # Safety
 /// See `__stpncpy`.
-#[cfg_attr(not(test), no_mangle)]
+#[cfg_attr(target_env = "musl", no_mangle)]
 pub unsafe extern "C" fn strncpy(d: *mut c_char, s: *const c_char, n: size_t) -> *mut c_char {
     // SAFETY: forwarded.
     unsafe {
@@ -333,7 +333,7 @@ pub unsafe extern "C" fn strncpy(d: *mut c_char, s: *const c_char, n: size_t) ->
 /// # Safety
 /// `dest` must be NUL-terminated and have room for `strlen(src) + 1` more
 /// bytes after its existing content.
-#[cfg_attr(not(test), no_mangle)]
+#[cfg_attr(target_env = "musl", no_mangle)]
 pub unsafe extern "C" fn strcat(dest: *mut c_char, src: *const c_char) -> *mut c_char {
     // SAFETY: caller guarantees the destination is sized to fit the
     // concatenation including the new terminator.
@@ -355,7 +355,7 @@ pub unsafe extern "C" fn strcat(dest: *mut c_char, src: *const c_char) -> *mut c
 ///
 /// # Safety
 /// `buf` must be writable for `buflen` bytes.
-#[cfg_attr(not(test), no_mangle)]
+#[cfg_attr(target_env = "musl", no_mangle)]
 pub unsafe extern "C" fn strerror_r(err: c_int, buf: *mut c_char, buflen: size_t) -> c_int {
     // Use the Rust-level helper so we're not bouncing through the C symbol
     // dance (which would be ugly under cfg(test) where the symbols are
@@ -392,7 +392,7 @@ pub unsafe extern "C" fn strerror_r(err: c_int, buf: *mut c_char, buflen: size_t
 ///
 /// # Safety
 /// See `strerror_r`.
-#[cfg_attr(not(test), no_mangle)]
+#[cfg_attr(target_env = "musl", no_mangle)]
 pub unsafe extern "C" fn __xpg_strerror_r(err: c_int, buf: *mut c_char, buflen: size_t) -> c_int {
     // SAFETY: forwarded.
     unsafe { strerror_r(err, buf, buflen) }

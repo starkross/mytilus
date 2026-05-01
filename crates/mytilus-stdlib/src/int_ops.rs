@@ -23,7 +23,7 @@ type intmax_t = i64;
 // ---------------------------------------------------------------------------
 
 /// `int abs(int a)`.
-#[cfg_attr(not(test), no_mangle)]
+#[cfg_attr(target_env = "musl", no_mangle)]
 pub extern "C" fn abs(a: c_int) -> c_int {
     if a > 0 {
         a
@@ -33,7 +33,7 @@ pub extern "C" fn abs(a: c_int) -> c_int {
 }
 
 /// `long labs(long a)`.
-#[cfg_attr(not(test), no_mangle)]
+#[cfg_attr(target_env = "musl", no_mangle)]
 pub extern "C" fn labs(a: c_long) -> c_long {
     if a > 0 {
         a
@@ -43,7 +43,7 @@ pub extern "C" fn labs(a: c_long) -> c_long {
 }
 
 /// `long long llabs(long long a)`.
-#[cfg_attr(not(test), no_mangle)]
+#[cfg_attr(target_env = "musl", no_mangle)]
 pub extern "C" fn llabs(a: c_longlong) -> c_longlong {
     if a > 0 {
         a
@@ -53,7 +53,7 @@ pub extern "C" fn llabs(a: c_longlong) -> c_longlong {
 }
 
 /// `intmax_t imaxabs(intmax_t a)`.
-#[cfg_attr(not(test), no_mangle)]
+#[cfg_attr(target_env = "musl", no_mangle)]
 pub extern "C" fn imaxabs(a: intmax_t) -> intmax_t {
     if a > 0 {
         a
@@ -102,7 +102,7 @@ pub struct imaxdiv_t {
 }
 
 /// `div_t div(int num, int den)`.
-#[cfg_attr(not(test), no_mangle)]
+#[cfg_attr(target_env = "musl", no_mangle)]
 pub extern "C" fn div(num: c_int, den: c_int) -> div_t {
     div_t {
         quot: num / den,
@@ -111,7 +111,7 @@ pub extern "C" fn div(num: c_int, den: c_int) -> div_t {
 }
 
 /// `ldiv_t ldiv(long num, long den)`.
-#[cfg_attr(not(test), no_mangle)]
+#[cfg_attr(target_env = "musl", no_mangle)]
 pub extern "C" fn ldiv(num: c_long, den: c_long) -> ldiv_t {
     ldiv_t {
         quot: num / den,
@@ -120,7 +120,7 @@ pub extern "C" fn ldiv(num: c_long, den: c_long) -> ldiv_t {
 }
 
 /// `lldiv_t lldiv(long long num, long long den)`.
-#[cfg_attr(not(test), no_mangle)]
+#[cfg_attr(target_env = "musl", no_mangle)]
 pub extern "C" fn lldiv(num: c_longlong, den: c_longlong) -> lldiv_t {
     lldiv_t {
         quot: num / den,
@@ -129,7 +129,7 @@ pub extern "C" fn lldiv(num: c_longlong, den: c_longlong) -> lldiv_t {
 }
 
 /// `imaxdiv_t imaxdiv(intmax_t num, intmax_t den)`.
-#[cfg_attr(not(test), no_mangle)]
+#[cfg_attr(target_env = "musl", no_mangle)]
 pub extern "C" fn imaxdiv(num: intmax_t, den: intmax_t) -> imaxdiv_t {
     imaxdiv_t {
         quot: num / den,

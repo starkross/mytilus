@@ -132,7 +132,7 @@ const OFF_MASK: u64 = PAGE_SIZE - 1;
 /// `addr` may be NULL or a valid mapping hint. `fd` must be a valid file
 /// descriptor for file-backed mappings (ignored for `MAP_ANON`). Other args
 /// follow the Linux `mmap(2)` contract.
-#[cfg_attr(not(test), no_mangle)]
+#[cfg_attr(target_env = "musl", no_mangle)]
 pub unsafe extern "C" fn mmap(
     addr: *mut c_void,
     length: size_t,
@@ -193,7 +193,7 @@ pub unsafe extern "C" fn mmap(
 /// # Safety
 /// `addr` must be the result of a previous `mmap` (or page-aligned and
 /// within a mapped range), and `length` must be a multiple of the page size.
-#[cfg_attr(not(test), no_mangle)]
+#[cfg_attr(target_env = "musl", no_mangle)]
 pub unsafe extern "C" fn munmap(addr: *mut c_void, length: size_t) -> c_int {
     // (TODO(thread): unconditional __vm_wait() upstream — see module note.)
     // SAFETY: kernel does the heavy lifting; we just forward.
@@ -207,7 +207,7 @@ pub unsafe extern "C" fn munmap(addr: *mut c_void, length: size_t) -> c_int {
 /// # Safety
 /// `addr` must be page-aligned (we don't round). `length` should cover whole
 /// pages (rounded up by the kernel).
-#[cfg_attr(not(test), no_mangle)]
+#[cfg_attr(target_env = "musl", no_mangle)]
 pub unsafe extern "C" fn mprotect(addr: *mut c_void, length: size_t, prot: c_int) -> c_int {
     // SAFETY: forwards to kernel; see TODO(auxv/page-size) at module level —
     // we do not round addr/length to PAGE_SIZE the way upstream does.
@@ -232,7 +232,7 @@ pub unsafe extern "C" fn mprotect(addr: *mut c_void, length: size_t, prot: c_int
 ///
 /// # Safety
 /// `old_addr` must be a previously-mapped region of length `old_len`.
-#[cfg_attr(not(test), no_mangle)]
+#[cfg_attr(target_env = "musl", no_mangle)]
 pub unsafe extern "C" fn mremap(
     old_addr: *mut c_void,
     old_len: size_t,
@@ -272,7 +272,7 @@ pub unsafe extern "C" fn mremap(
 ///
 /// # Safety
 /// `addr` must point to a mapped region of length `length`.
-#[cfg_attr(not(test), no_mangle)]
+#[cfg_attr(target_env = "musl", no_mangle)]
 pub unsafe extern "C" fn msync(addr: *mut c_void, length: size_t, flags: c_int) -> c_int {
     // Note: upstream uses `syscall_cp` (cancellation-point variant) here.
     // We call the regular svc; cancellation isn't wired up yet and msync
@@ -288,7 +288,7 @@ pub unsafe extern "C" fn msync(addr: *mut c_void, length: size_t, flags: c_int) 
 ///
 /// # Safety
 /// `addr` must point to a mapped region of length `length`.
-#[cfg_attr(not(test), no_mangle)]
+#[cfg_attr(target_env = "musl", no_mangle)]
 pub unsafe extern "C" fn madvise(addr: *mut c_void, length: size_t, advice: c_int) -> c_int {
     // SAFETY: forwards to the kernel.
     let r = unsafe {
@@ -310,7 +310,7 @@ pub unsafe extern "C" fn madvise(addr: *mut c_void, length: size_t, advice: c_in
 ///
 /// # Safety
 /// See `madvise`.
-#[cfg_attr(not(test), no_mangle)]
+#[cfg_attr(target_env = "musl", no_mangle)]
 pub unsafe extern "C" fn posix_madvise(addr: *mut c_void, length: size_t, advice: c_int) -> c_int {
     if advice == MADV_DONTNEED {
         return 0;
@@ -334,7 +334,7 @@ pub unsafe extern "C" fn posix_madvise(addr: *mut c_void, length: size_t, advice
 /// # Safety
 /// `addr` must be page-aligned and a mapped range; `vec` must be writable
 /// for `(length + page_size - 1) / page_size` bytes.
-#[cfg_attr(not(test), no_mangle)]
+#[cfg_attr(target_env = "musl", no_mangle)]
 pub unsafe extern "C" fn mincore(addr: *mut c_void, length: size_t, vec: *mut c_uchar) -> c_int {
     // SAFETY: forwards to the kernel.
     let r = unsafe { syscall3(SYS_mincore, addr as c_long, length as c_long, vec as c_long) };
@@ -350,7 +350,7 @@ pub unsafe extern "C" fn mincore(addr: *mut c_void, length: size_t, vec: *mut c_
 ///
 /// # Safety
 /// `addr` must point to readable memory of length `length`.
-#[cfg_attr(not(test), no_mangle)]
+#[cfg_attr(target_env = "musl", no_mangle)]
 pub unsafe extern "C" fn mlock(addr: *const c_void, length: size_t) -> c_int {
     // SAFETY: forwards to the kernel. AArch64 has SYS_mlock; the SYS_mlock2
     // fallback the upstream C uses isn't needed here.
@@ -363,7 +363,7 @@ pub unsafe extern "C" fn mlock(addr: *const c_void, length: size_t) -> c_int {
 ///
 /// # Safety
 /// See `mlock`.
-#[cfg_attr(not(test), no_mangle)]
+#[cfg_attr(target_env = "musl", no_mangle)]
 pub unsafe extern "C" fn munlock(addr: *const c_void, length: size_t) -> c_int {
     // SAFETY: forwards to the kernel.
     let r = unsafe { syscall2(SYS_munlock, addr as c_long, length as c_long) };
@@ -372,7 +372,7 @@ pub unsafe extern "C" fn munlock(addr: *const c_void, length: size_t) -> c_int {
 }
 
 /// `int mlockall(int flags)`
-#[cfg_attr(not(test), no_mangle)]
+#[cfg_attr(target_env = "musl", no_mangle)]
 pub extern "C" fn mlockall(flags: c_int) -> c_int {
     // SAFETY: no caller-supplied pointers; pure kernel call.
     let r = unsafe { syscall1(SYS_mlockall, flags as c_long) };
@@ -381,7 +381,7 @@ pub extern "C" fn mlockall(flags: c_int) -> c_int {
 }
 
 /// `int munlockall(void)`
-#[cfg_attr(not(test), no_mangle)]
+#[cfg_attr(target_env = "musl", no_mangle)]
 pub extern "C" fn munlockall() -> c_int {
     // SAFETY: no args.
     let r = unsafe { mytilus_sys::syscall::syscall0(SYS_munlockall) };

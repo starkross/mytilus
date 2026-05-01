@@ -13,7 +13,7 @@ use mytilus_sys::ctypes::{c_int, c_void, size_t};
 /// # Safety
 /// `dest` and `src` must each point to at least `n` writable / readable
 /// bytes, and the regions must not overlap. Use `memmove` for overlap.
-#[cfg_attr(not(test), no_mangle)]
+#[cfg_attr(target_env = "musl", no_mangle)]
 pub unsafe extern "C" fn memcpy(dest: *mut c_void, src: *const c_void, n: size_t) -> *mut c_void {
     let d = dest as *mut u8;
     let s = src as *const u8;
@@ -37,7 +37,7 @@ pub unsafe extern "C" fn memcpy(dest: *mut c_void, src: *const c_void, n: size_t
 ///
 /// # Safety
 /// Both pointers must be valid for `n` bytes; overlap is permitted.
-#[cfg_attr(not(test), no_mangle)]
+#[cfg_attr(target_env = "musl", no_mangle)]
 pub unsafe extern "C" fn memmove(dest: *mut c_void, src: *const c_void, n: size_t) -> *mut c_void {
     let d = dest as *mut u8;
     let s = src as *const u8;
@@ -68,7 +68,7 @@ pub unsafe extern "C" fn memmove(dest: *mut c_void, src: *const c_void, n: size_
 ///
 /// # Safety
 /// `dest` must point to at least `n` writable bytes.
-#[cfg_attr(not(test), no_mangle)]
+#[cfg_attr(target_env = "musl", no_mangle)]
 pub unsafe extern "C" fn memset(dest: *mut c_void, c: c_int, n: size_t) -> *mut c_void {
     let d = dest as *mut u8;
     let byte = c as u8;
@@ -90,7 +90,7 @@ pub unsafe extern "C" fn memset(dest: *mut c_void, c: c_int, n: size_t) -> *mut 
 ///
 /// # Safety
 /// Both pointers must point to at least `n` readable bytes.
-#[cfg_attr(not(test), no_mangle)]
+#[cfg_attr(target_env = "musl", no_mangle)]
 pub unsafe extern "C" fn memcmp(vl: *const c_void, vr: *const c_void, n: size_t) -> c_int {
     let l = vl as *const u8;
     let r = vr as *const u8;

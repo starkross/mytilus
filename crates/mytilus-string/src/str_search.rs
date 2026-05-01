@@ -52,7 +52,7 @@ fn fold(b: u8) -> u8 {
 ///
 /// # Safety
 /// Both `h` and `n` must be NUL-terminated.
-#[cfg_attr(not(test), no_mangle)]
+#[cfg_attr(target_env = "musl", no_mangle)]
 pub unsafe extern "C" fn strstr(h: *const c_char, n: *const c_char) -> *mut c_char {
     // SAFETY: caller guarantees both strings are NUL-terminated; we walk
     // forward through h and, at each position, attempt to match n.
@@ -87,7 +87,7 @@ pub unsafe extern "C" fn strstr(h: *const c_char, n: *const c_char) -> *mut c_ch
 ///
 /// # Safety
 /// Both pointers must be NUL-terminated.
-#[cfg_attr(not(test), no_mangle)]
+#[cfg_attr(target_env = "musl", no_mangle)]
 pub unsafe extern "C" fn strspn(s: *const c_char, c: *const c_char) -> size_t {
     // SAFETY: caller guarantees both strings are NUL-terminated.
     unsafe {
@@ -122,7 +122,7 @@ pub unsafe extern "C" fn strspn(s: *const c_char, c: *const c_char) -> size_t {
 ///
 /// # Safety
 /// Both pointers must be NUL-terminated.
-#[cfg_attr(not(test), no_mangle)]
+#[cfg_attr(target_env = "musl", no_mangle)]
 pub unsafe extern "C" fn strcspn(s: *const c_char, c: *const c_char) -> size_t {
     // SAFETY: caller guarantees both strings are NUL-terminated.
     unsafe {
@@ -151,7 +151,7 @@ pub unsafe extern "C" fn strcspn(s: *const c_char, c: *const c_char) -> size_t {
 ///
 /// # Safety
 /// Both pointers must be NUL-terminated.
-#[cfg_attr(not(test), no_mangle)]
+#[cfg_attr(target_env = "musl", no_mangle)]
 pub unsafe extern "C" fn strpbrk(s: *const c_char, b: *const c_char) -> *mut c_char {
     // SAFETY: caller guarantees both strings are NUL-terminated; strcspn
     // returns the offset of the first match (or strlen(s) if none, in
@@ -178,7 +178,7 @@ pub unsafe extern "C" fn strpbrk(s: *const c_char, b: *const c_char) -> *mut c_c
 /// # Safety
 /// `str` must be a valid `**char`; if `*str` is non-NULL it must be
 /// NUL-terminated and writable. `sep` must be NUL-terminated.
-#[cfg_attr(not(test), no_mangle)]
+#[cfg_attr(target_env = "musl", no_mangle)]
 pub unsafe extern "C" fn strsep(str_: *mut *mut c_char, sep: *const c_char) -> *mut c_char {
     // SAFETY: caller-provided pointers; we mutate *str_ in place.
     unsafe {
@@ -203,7 +203,7 @@ pub unsafe extern "C" fn strsep(str_: *mut *mut c_char, sep: *const c_char) -> *
 /// # Safety
 /// `s` and `sep` (both `*const c_char`-shaped) must be NUL-terminated when
 /// non-NULL. `p` must be a valid `**char` whose pointee will be updated.
-#[cfg_attr(not(test), no_mangle)]
+#[cfg_attr(target_env = "musl", no_mangle)]
 pub unsafe extern "C" fn strtok_r(
     mut s: *mut c_char,
     sep: *const c_char,
@@ -249,7 +249,7 @@ static STRTOK_STATE: AtomicPtr<c_char> = AtomicPtr::new(core::ptr::null_mut());
 /// # Safety
 /// See `strtok_r`. Caller must NOT call `strtok` from multiple threads on
 /// overlapping searches.
-#[cfg_attr(not(test), no_mangle)]
+#[cfg_attr(target_env = "musl", no_mangle)]
 pub unsafe extern "C" fn strtok(s: *mut c_char, sep: *const c_char) -> *mut c_char {
     // SAFETY: forwarded to strtok_r against our private saveptr slot.
     unsafe {
@@ -270,7 +270,7 @@ pub unsafe extern "C" fn strtok(s: *mut c_char, sep: *const c_char) -> *mut c_ch
 ///
 /// # Safety
 /// Both pointers must be NUL-terminated.
-#[cfg_attr(not(test), no_mangle)]
+#[cfg_attr(target_env = "musl", no_mangle)]
 pub unsafe extern "C" fn strcasecmp(l: *const c_char, r: *const c_char) -> c_int {
     // SAFETY: caller guarantees both strings are NUL-terminated.
     unsafe {
@@ -296,7 +296,7 @@ pub unsafe extern "C" fn strcasecmp(l: *const c_char, r: *const c_char) -> c_int
 ///
 /// # Safety
 /// Both pointers must be valid for `min(n, strlen+1)` bytes.
-#[cfg_attr(not(test), no_mangle)]
+#[cfg_attr(target_env = "musl", no_mangle)]
 pub unsafe extern "C" fn strncasecmp(l: *const c_char, r: *const c_char, mut n: size_t) -> c_int {
     if n == 0 {
         return 0;
@@ -321,7 +321,7 @@ pub unsafe extern "C" fn strncasecmp(l: *const c_char, r: *const c_char, mut n: 
 ///
 /// # Safety
 /// See `strcasecmp`.
-#[cfg_attr(not(test), no_mangle)]
+#[cfg_attr(target_env = "musl", no_mangle)]
 pub unsafe extern "C" fn __strcasecmp_l(
     l: *const c_char,
     r: *const c_char,
@@ -333,7 +333,7 @@ pub unsafe extern "C" fn __strcasecmp_l(
 
 /// # Safety
 /// See `strcasecmp`.
-#[cfg_attr(not(test), no_mangle)]
+#[cfg_attr(target_env = "musl", no_mangle)]
 pub unsafe extern "C" fn strcasecmp_l(
     l: *const c_char,
     r: *const c_char,
@@ -348,7 +348,7 @@ pub unsafe extern "C" fn strcasecmp_l(
 ///
 /// # Safety
 /// See `strncasecmp`.
-#[cfg_attr(not(test), no_mangle)]
+#[cfg_attr(target_env = "musl", no_mangle)]
 pub unsafe extern "C" fn __strncasecmp_l(
     l: *const c_char,
     r: *const c_char,
@@ -361,7 +361,7 @@ pub unsafe extern "C" fn __strncasecmp_l(
 
 /// # Safety
 /// See `strncasecmp`.
-#[cfg_attr(not(test), no_mangle)]
+#[cfg_attr(target_env = "musl", no_mangle)]
 pub unsafe extern "C" fn strncasecmp_l(
     l: *const c_char,
     r: *const c_char,

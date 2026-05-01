@@ -13,16 +13,26 @@ syscall wrappers), `mytilus-locale` (Phase 1: ctype subset),
 `timeval` FFI structs), `mytilus-signal` (Phase 1: sigset_t bit-ops),
 `mytilus-stdlib` (Phase 1: abs/div/qsort/bsearch — first callback FFI),
 `mytilus-fcntl` (Phase 1: open/openat/creat/fcntl/posix_fadvise/posix_fallocate
-— first variadic FFI), CI workflow.
+— first variadic FFI), CI workflow,
+`mytilus-unistd` (Phase 1: sleep/usleep/pause/dup family/getpagesize/sync
+family — first cross-crate-symbol consumer), workspace-wide symbol-gating
+refactor (`cfg(not(test)) → cfg(target_env = "musl")`).
 
 ### Workspace conventions discovered/locked-in
 
 - **Symbol gating**: every C-ABI function that might collide with the host
-  libc on `cargo test` uses `#[cfg_attr(not(test), no_mangle)]`. On the
-  cross target `not(test)` holds and the unmangled C name is exported; on
-  host tests the symbol is mangled and doesn't shadow libc. Without this
-  the test binary's runtime calls (e.g. its own internal `mmap`/`memcpy`)
-  hit our stubs and abort before tests run.
+  libc uses `#[cfg_attr(target_env = "musl", no_mangle)]`. On the cross
+  target `target_env = "musl"` (per the spec) so the unmangled C name is
+  exported; on host (macOS = `""`, Linux gnu CI = `"gnu"`) the symbol is
+  mangled and doesn't shadow libc. **Earlier we used `cfg_attr(not(test),
+  no_mangle)`** — that worked for tests of *the same crate* (`cfg(test)`
+  is true there), but broke as soon as one crate consumed another via a
+  C-ABI dep: when crate A's tests pull in crate B as a dependency, B is
+  built with `cfg(test) = false`, so B's no_mangle still applies and
+  shadows libc inside A's test binary. The `target_env` gate sidesteps
+  this entirely. Caveat: on Linux-musl hosts (Alpine), `target_env =
+  "musl"` would still match — but our supported dev/CI hosts are macOS
+  and `x86_64-linux-gnu`, both safe.
 - **Force-linking rlibs that only provide symbols**: a crate that calls
   into another crate's items only via `extern "C"` (e.g. `mytilus-mman`
   using `mytilus-sys::syscall::ret` which calls `__errno_location`) needs
@@ -177,8 +187,8 @@ serde definitions. Fixed:
   recognise the exact PC range. Belongs in
   `mytilus-thread/src/asm/syscall_cp.S` per PLAN.md.
 - Syscall-number constants: populated lazily in `nr.rs` as consumers
-  arrive. After this session: 11 mman NRs + 6 time NRs + 5 fcntl NRs
-  (= 22). We deliberately avoid pre-populating the full ~300-entry table.
+  arrive. After this session: 11 mman + 6 time + 5 fcntl + 6 unistd
+  (= 28). We deliberately avoid pre-populating the full ~300-entry table.
 - `task test:qemu` is required to actually run anything that hits a real
   syscall; pre-existing TODO in the Taskfile.
 
@@ -284,6 +294,34 @@ serde definitions. Fixed:
   `strtol` family, `atoi`/`atol`/`atoll`, `strtod`/`atof`, env
   (`getenv`/`setenv`/`putenv`/`unsetenv`), exit/atexit, `mblen` family,
   `realpath`, `mkstemp`/`mkdtemp`, `system`.
+
+#### `mytilus-unistd`
+- Phase 1 ports `sleep`, `usleep`, `pause`, `dup`, `dup2`, `dup3` /
+  `__dup3`, `getpagesize`, `sync`, `fsync`, `fdatasync` (11 C-ABI
+  symbols).
+- **First cross-crate-symbol consumer**: `sleep`/`usleep` are userspace
+  wrappers that call `mytilus_time::nanosleep`. The Cargo dep is
+  `mytilus-unistd → mytilus-time`. At final-link time, the `bl
+  nanosleep` from sleep's body resolves to mytilus-time's symbol — the
+  first time we have one of our libc symbols call another via C ABI.
+  This proof-of-concept exposed the workspace-wide symbol-gating bug
+  (see workspace conventions above).
+- **AArch64 specializations**:
+  - No `SYS_pause`. We use `ppoll(NULL, 0, NULL, NULL)` per upstream.
+  - No `SYS_dup2`. `dup2` routes through `SYS_dup3` with flags=0,
+    after the POSIX `old==new` early-return (validated via
+    `fcntl(F_GETFD)`).
+- `getpagesize` returns `4096` unconditionally. `TODO(auxv)`: read
+  `AT_PAGESZ` once `mytilus-startup` parses auxv. PLAN.md commits to
+  4 KB on aarch64; 16 KB / 64 KB kernel-page builds need this fix.
+- `sync` returns `void` (the only such function in the workspace so
+  far). All other `*sync` family members return int with the standard
+  `-1+errno-set` convention.
+- `TODO(thread/cancel)`: `pause`, `fsync`, `fdatasync` are cancellation
+  points upstream. We use plain `svc`. Switch when `mytilus-thread`
+  lands.
+- 6 NRs added to `mytilus-sys::nr`: `SYS_dup`, `SYS_dup3`, `SYS_ppoll`,
+  `SYS_sync`, `SYS_fsync`, `SYS_fdatasync`.
 
 #### `mytilus-fcntl`
 - Phase 1 ports `open`, `openat`, `creat`, `fcntl`, `posix_fadvise`,
