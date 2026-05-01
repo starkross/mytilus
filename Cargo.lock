@@ -209,10 +209,7 @@ dependencies = [
 name = "mytilus-startup"
 version = "0.1.0"
 dependencies = [
- "mytilus-internal",
- "mytilus-mman",
  "mytilus-sys",
- "mytilus-thread",
 ]
 
 [[package]]

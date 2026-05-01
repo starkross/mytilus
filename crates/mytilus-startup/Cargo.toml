@@ -16,6 +16,6 @@ name = "mytilus_startup"
 
 [dependencies]
 mytilus-sys.path = "../mytilus-sys"
-mytilus-internal.path = "../mytilus-internal"
-mytilus-mman.path = "../mytilus-mman"
-mytilus-thread.path = "../mytilus-thread"
+# mytilus-internal/mman/thread return when crt1/__libc_start_main lands.
+# Phase 1 ports just setjmp.s + longjmp.s and only needs c_ulong/c_int
+# from mytilus-sys.
