@@ -38,3 +38,16 @@ pub const SYS_clock_gettime: c_long = 113;
 pub const SYS_clock_getres: c_long = 114;
 pub const SYS_clock_nanosleep: c_long = 115;
 pub const SYS_gettimeofday: c_long = 169;
+
+// ---------------------------------------------------------------------------
+// fcntl / fd ops (consumed by mytilus-fcntl)
+// ---------------------------------------------------------------------------
+//
+// Note: aarch64 has NO `SYS_open` — only `SYS_openat`. Upstream's `open()`
+// on aarch64 routes through `openat(AT_FDCWD, …)`. We do the same.
+
+pub const SYS_fcntl: c_long = 25;
+pub const SYS_fallocate: c_long = 47;
+pub const SYS_openat: c_long = 56;
+pub const SYS_close: c_long = 57;
+pub const SYS_fadvise64: c_long = 223;
