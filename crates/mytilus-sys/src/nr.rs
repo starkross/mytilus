@@ -51,3 +51,17 @@ pub const SYS_fallocate: c_long = 47;
 pub const SYS_openat: c_long = 56;
 pub const SYS_close: c_long = 57;
 pub const SYS_fadvise64: c_long = 223;
+
+// ---------------------------------------------------------------------------
+// fd shuffle + sync (consumed by mytilus-unistd)
+// ---------------------------------------------------------------------------
+//
+// Note: aarch64 has no `SYS_dup2` (use `SYS_dup3` with flags=0) and no
+// `SYS_pause` (use `SYS_ppoll(0,0,0,0)` — waits forever on no fds).
+
+pub const SYS_dup: c_long = 23;
+pub const SYS_dup3: c_long = 24;
+pub const SYS_ppoll: c_long = 73;
+pub const SYS_sync: c_long = 81;
+pub const SYS_fsync: c_long = 82;
+pub const SYS_fdatasync: c_long = 83;

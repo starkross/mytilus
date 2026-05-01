@@ -11,7 +11,7 @@
 //! `locale_t` is a placeholder `*mut c_void` until the full locale story
 //! lands.
 //!
-//! Symbol gating: `#[cfg_attr(not(test), no_mangle)]` keeps the C names
+//! Symbol gating: `#[cfg_attr(target_env = "musl", no_mangle)]` keeps the C names
 //! off the test binary's link table on macOS host (otherwise our `tolower`
 //! shadows libsystem's, which the Rust test runtime calls internally).
 
@@ -35,7 +35,7 @@ fn u(c: c_int) -> u32 {
 // ---------------------------------------------------------------------------
 
 /// `int isalpha(int c)`
-#[cfg_attr(not(test), no_mangle)]
+#[cfg_attr(target_env = "musl", no_mangle)]
 pub extern "C" fn isalpha(c: c_int) -> c_int {
     // Upstream: `((unsigned)c|32)-'a' < 26` — case-fold to lowercase, then
     // check 'a'..='z' via wrap-around unsigned compare.
@@ -43,14 +43,14 @@ pub extern "C" fn isalpha(c: c_int) -> c_int {
 }
 
 /// `int isdigit(int c)`
-#[cfg_attr(not(test), no_mangle)]
+#[cfg_attr(target_env = "musl", no_mangle)]
 pub extern "C" fn isdigit(c: c_int) -> c_int {
     // Upstream: `(unsigned)c-'0' < 10`.
     (u(c).wrapping_sub(b'0' as u32) < 10) as c_int
 }
 
 /// `int isspace(int c)`
-#[cfg_attr(not(test), no_mangle)]
+#[cfg_attr(target_env = "musl", no_mangle)]
 pub extern "C" fn isspace(c: c_int) -> c_int {
     // Upstream: `c == ' ' || (unsigned)c-'\t' < 5` — '\t', '\n', '\v', '\f',
     // '\r' are five contiguous bytes starting at 0x09.
@@ -58,70 +58,70 @@ pub extern "C" fn isspace(c: c_int) -> c_int {
 }
 
 /// `int isupper(int c)`
-#[cfg_attr(not(test), no_mangle)]
+#[cfg_attr(target_env = "musl", no_mangle)]
 pub extern "C" fn isupper(c: c_int) -> c_int {
     // Upstream: `(unsigned)c-'A' < 26`.
     (u(c).wrapping_sub(b'A' as u32) < 26) as c_int
 }
 
 /// `int islower(int c)`
-#[cfg_attr(not(test), no_mangle)]
+#[cfg_attr(target_env = "musl", no_mangle)]
 pub extern "C" fn islower(c: c_int) -> c_int {
     // Upstream: `(unsigned)c-'a' < 26`.
     (u(c).wrapping_sub(b'a' as u32) < 26) as c_int
 }
 
 /// `int isalnum(int c)`
-#[cfg_attr(not(test), no_mangle)]
+#[cfg_attr(target_env = "musl", no_mangle)]
 pub extern "C" fn isalnum(c: c_int) -> c_int {
     // Upstream: `isalpha(c) || isdigit(c)`.
     (isalpha(c) != 0 || isdigit(c) != 0) as c_int
 }
 
 /// `int isxdigit(int c)`
-#[cfg_attr(not(test), no_mangle)]
+#[cfg_attr(target_env = "musl", no_mangle)]
 pub extern "C" fn isxdigit(c: c_int) -> c_int {
     // Upstream: `isdigit(c) || ((unsigned)c|32)-'a' < 6`.
     (isdigit(c) != 0 || (u(c) | 32).wrapping_sub(b'a' as u32) < 6) as c_int
 }
 
 /// `int isgraph(int c)`
-#[cfg_attr(not(test), no_mangle)]
+#[cfg_attr(target_env = "musl", no_mangle)]
 pub extern "C" fn isgraph(c: c_int) -> c_int {
     // Upstream: `(unsigned)c-0x21 < 0x5e` — printable, excluding space.
     (u(c).wrapping_sub(0x21) < 0x5e) as c_int
 }
 
 /// `int isprint(int c)`
-#[cfg_attr(not(test), no_mangle)]
+#[cfg_attr(target_env = "musl", no_mangle)]
 pub extern "C" fn isprint(c: c_int) -> c_int {
     // Upstream: `(unsigned)c-0x20 < 0x5f` — printable, including space.
     (u(c).wrapping_sub(0x20) < 0x5f) as c_int
 }
 
 /// `int ispunct(int c)`
-#[cfg_attr(not(test), no_mangle)]
+#[cfg_attr(target_env = "musl", no_mangle)]
 pub extern "C" fn ispunct(c: c_int) -> c_int {
     // Upstream: `isgraph(c) && !isalnum(c)`.
     (isgraph(c) != 0 && isalnum(c) == 0) as c_int
 }
 
 /// `int iscntrl(int c)`
-#[cfg_attr(not(test), no_mangle)]
+#[cfg_attr(target_env = "musl", no_mangle)]
 pub extern "C" fn iscntrl(c: c_int) -> c_int {
     // Upstream: `(unsigned)c < 0x20 || c == 0x7f`.
     (u(c) < 0x20 || c == 0x7f) as c_int
 }
 
 /// `int isblank(int c)`
-#[cfg_attr(not(test), no_mangle)]
+#[cfg_attr(target_env = "musl", no_mangle)]
 pub extern "C" fn isblank(c: c_int) -> c_int {
     // Upstream: `c == ' ' || c == '\t'`.
     (c == b' ' as c_int || c == b'\t' as c_int) as c_int
 }
 
 /// `int isascii(int c)` — non-locale-aware (no `isascii_l`).
-#[cfg_attr(not(test), no_mangle)]
+#[cfg_attr(target_env = "musl", no_mangle)]
 pub extern "C" fn isascii(c: c_int) -> c_int {
     // Upstream: `!(c & ~0x7f)`.
     ((c & !0x7f) == 0) as c_int
@@ -132,7 +132,7 @@ pub extern "C" fn isascii(c: c_int) -> c_int {
 // ---------------------------------------------------------------------------
 
 /// `int tolower(int c)`
-#[cfg_attr(not(test), no_mangle)]
+#[cfg_attr(target_env = "musl", no_mangle)]
 pub extern "C" fn tolower(c: c_int) -> c_int {
     // Upstream: `if (isupper(c)) return c | 32; return c;`
     if isupper(c) != 0 {
@@ -143,7 +143,7 @@ pub extern "C" fn tolower(c: c_int) -> c_int {
 }
 
 /// `int toupper(int c)`
-#[cfg_attr(not(test), no_mangle)]
+#[cfg_attr(target_env = "musl", no_mangle)]
 pub extern "C" fn toupper(c: c_int) -> c_int {
     // Upstream: `if (islower(c)) return c & 0x5f; return c;`
     if islower(c) != 0 {
@@ -156,7 +156,7 @@ pub extern "C" fn toupper(c: c_int) -> c_int {
 /// `int toascii(int c)` — non-locale-aware. Upstream comment calls it a
 /// "nonsense function that should NEVER be used"; we ship it for ABI
 /// compatibility.
-#[cfg_attr(not(test), no_mangle)]
+#[cfg_attr(target_env = "musl", no_mangle)]
 pub extern "C" fn toascii(c: c_int) -> c_int {
     c & 0x7f
 }
@@ -174,14 +174,14 @@ macro_rules! ctype_l {
     ($base:ident, $impl_:ident, $alias:ident) => {
         /// # Safety
         /// Forwards to the non-locale form; the locale handle is unused.
-        #[cfg_attr(not(test), no_mangle)]
+        #[cfg_attr(target_env = "musl", no_mangle)]
         pub extern "C" fn $impl_(c: c_int, _loc: locale_t) -> c_int {
             $base(c)
         }
 
         /// # Safety
         /// See the `__*_l` form.
-        #[cfg_attr(not(test), no_mangle)]
+        #[cfg_attr(target_env = "musl", no_mangle)]
         pub extern "C" fn $alias(c: c_int, loc: locale_t) -> c_int {
             $impl_(c, loc)
         }

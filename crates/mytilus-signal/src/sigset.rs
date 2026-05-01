@@ -107,7 +107,7 @@ unsafe fn set_einval_return_minus1() -> c_int {
 ///
 /// # Safety
 /// `set` must point to a writable `sigset_t`.
-#[cfg_attr(not(test), no_mangle)]
+#[cfg_attr(target_env = "musl", no_mangle)]
 pub unsafe extern "C" fn sigemptyset(set: *mut sigset_t) -> c_int {
     // SAFETY: caller-provided pointer is asserted writable.
     unsafe {
@@ -130,7 +130,7 @@ pub unsafe extern "C" fn sigemptyset(set: *mut sigset_t) -> c_int {
 ///
 /// # Safety
 /// `set` must point to a writable `sigset_t`.
-#[cfg_attr(not(test), no_mangle)]
+#[cfg_attr(target_env = "musl", no_mangle)]
 pub unsafe extern "C" fn sigfillset(set: *mut sigset_t) -> c_int {
     // SAFETY: caller-provided pointer is asserted writable.
     unsafe {
@@ -148,7 +148,7 @@ pub unsafe extern "C" fn sigfillset(set: *mut sigset_t) -> c_int {
 ///
 /// # Safety
 /// `set` must point to a writable `sigset_t`.
-#[cfg_attr(not(test), no_mangle)]
+#[cfg_attr(target_env = "musl", no_mangle)]
 pub unsafe extern "C" fn sigaddset(set: *mut sigset_t, sig: c_int) -> c_int {
     if validate_sig(sig) {
         // SAFETY: errno write only.
@@ -167,7 +167,7 @@ pub unsafe extern "C" fn sigaddset(set: *mut sigset_t, sig: c_int) -> c_int {
 ///
 /// # Safety
 /// `set` must point to a writable `sigset_t`.
-#[cfg_attr(not(test), no_mangle)]
+#[cfg_attr(target_env = "musl", no_mangle)]
 pub unsafe extern "C" fn sigdelset(set: *mut sigset_t, sig: c_int) -> c_int {
     if validate_sig(sig) {
         // SAFETY: errno write only.
@@ -192,7 +192,7 @@ pub unsafe extern "C" fn sigdelset(set: *mut sigset_t, sig: c_int) -> c_int {
 ///
 /// # Safety
 /// `set` must point to a readable `sigset_t`.
-#[cfg_attr(not(test), no_mangle)]
+#[cfg_attr(target_env = "musl", no_mangle)]
 pub unsafe extern "C" fn sigismember(set: *const sigset_t, sig: c_int) -> c_int {
     let s = (sig - 1) as c_uint_helper;
     if s >= (_NSIG - 1) as c_uint_helper {
@@ -213,7 +213,7 @@ pub unsafe extern "C" fn sigismember(set: *const sigset_t, sig: c_int) -> c_int 
 ///
 /// # Safety
 /// All three pointers must reference valid `sigset_t`s; they may alias.
-#[cfg_attr(not(test), no_mangle)]
+#[cfg_attr(target_env = "musl", no_mangle)]
 pub unsafe extern "C" fn sigorset(
     dest: *mut sigset_t,
     left: *const sigset_t,
@@ -234,7 +234,7 @@ pub unsafe extern "C" fn sigorset(
 ///
 /// # Safety
 /// See [`sigorset`].
-#[cfg_attr(not(test), no_mangle)]
+#[cfg_attr(target_env = "musl", no_mangle)]
 pub unsafe extern "C" fn sigandset(
     dest: *mut sigset_t,
     left: *const sigset_t,
@@ -253,7 +253,7 @@ pub unsafe extern "C" fn sigandset(
 ///
 /// # Safety
 /// `set` must point to a readable `sigset_t`.
-#[cfg_attr(not(test), no_mangle)]
+#[cfg_attr(target_env = "musl", no_mangle)]
 pub unsafe extern "C" fn sigisemptyset(set: *const sigset_t) -> c_int {
     // SAFETY: caller asserts pointer is valid; we touch only the first
     // SST_SIZE words.

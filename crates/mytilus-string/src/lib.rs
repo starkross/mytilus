@@ -11,7 +11,7 @@
 //! commits to the same approach for the perf path. The asm replacements
 //! will land in a follow-up.
 //!
-//! Symbol gating: `#[cfg_attr(not(test), no_mangle)]` keeps the C names off
+//! Symbol gating: `#[cfg_attr(target_env = "musl", no_mangle)]` keeps the C names off
 //! the symbol table when the test binary is linked against the host libc —
 //! otherwise our `memcpy` collides with libsystem's. The cross target (and
 //! plain `cargo build`) gets the unmangled names.

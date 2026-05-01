@@ -17,3 +17,6 @@ name = "mytilus_unistd"
 [dependencies]
 mytilus-sys.path = "../mytilus-sys"
 mytilus-errno.path = "../mytilus-errno"
+# First **cross-crate-symbol** dep: `sleep`/`usleep` upstream call
+# `nanosleep`, which now lives in mytilus-time.
+mytilus-time.path = "../mytilus-time"

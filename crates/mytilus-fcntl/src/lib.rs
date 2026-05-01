@@ -160,7 +160,7 @@ unsafe fn openat_inner(dirfd: c_int, filename: *const c_char, flags: c_int, mode
 /// `filename` must point to a NUL-terminated path. If the variadic mode arg
 /// is required (per the flag check above), the caller MUST pass it; otherwise
 /// it must NOT be passed.
-#[cfg_attr(not(test), no_mangle)]
+#[cfg_attr(target_env = "musl", no_mangle)]
 pub unsafe extern "C" fn open(filename: *const c_char, flags: c_int, mut args: ...) -> c_int {
     let mode: mode_t = if (flags & O_CREAT) != 0 || (flags & O_TMPFILE) == O_TMPFILE {
         // SAFETY: caller is contractually required to pass the mode arg here.
@@ -176,7 +176,7 @@ pub unsafe extern "C" fn open(filename: *const c_char, flags: c_int, mut args: .
 ///
 /// # Safety
 /// See [`open`]. `dirfd` must be a valid directory fd or `AT_FDCWD`.
-#[cfg_attr(not(test), no_mangle)]
+#[cfg_attr(target_env = "musl", no_mangle)]
 pub unsafe extern "C" fn openat(
     dirfd: c_int,
     filename: *const c_char,
@@ -198,7 +198,7 @@ pub unsafe extern "C" fn openat(
 ///
 /// # Safety
 /// See [`open`].
-#[cfg_attr(not(test), no_mangle)]
+#[cfg_attr(target_env = "musl", no_mangle)]
 pub unsafe extern "C" fn creat(filename: *const c_char, mode: mode_t) -> c_int {
     // SAFETY: filename asserted NUL-terminated.
     unsafe { openat_inner(AT_FDCWD, filename, O_CREAT | O_WRONLY | O_TRUNC, mode) }
@@ -217,7 +217,7 @@ pub unsafe extern "C" fn creat(filename: *const c_char, mode: mode_t) -> c_int {
 /// # Safety
 /// Caller must pass exactly one variadic arg, of type `unsigned long` or
 /// pointer (e.g. `*mut struct flock` for `F_SETLK` / `F_GETLK`).
-#[cfg_attr(not(test), no_mangle)]
+#[cfg_attr(target_env = "musl", no_mangle)]
 pub unsafe extern "C" fn fcntl(fd: c_int, cmd: c_int, mut args: ...) -> c_int {
     // SAFETY: variadic contract.
     let mut arg: c_ulong = unsafe { args.arg::<c_ulong>() };
@@ -248,7 +248,7 @@ pub unsafe extern "C" fn fcntl(fd: c_int, cmd: c_int, mut args: ...) -> c_int {
 /// `int posix_fadvise(int fd, off_t base, off_t len, int advice)`.
 ///
 /// Returns 0 on success or a positive `errno`.
-#[cfg_attr(not(test), no_mangle)]
+#[cfg_attr(target_env = "musl", no_mangle)]
 pub extern "C" fn posix_fadvise(fd: c_int, base: off_t, len: off_t, advice: c_int) -> c_int {
     // SAFETY: pure kernel call; no caller-supplied pointers.
     let r = unsafe {
@@ -266,7 +266,7 @@ pub extern "C" fn posix_fadvise(fd: c_int, base: off_t, len: off_t, advice: c_in
 /// `int posix_fallocate(int fd, off_t base, off_t len)`.
 ///
 /// Returns 0 on success or a positive `errno`.
-#[cfg_attr(not(test), no_mangle)]
+#[cfg_attr(target_env = "musl", no_mangle)]
 pub extern "C" fn posix_fallocate(fd: c_int, base: off_t, len: off_t) -> c_int {
     // SAFETY: pure kernel call. SYS_fallocate is (fd, mode, offset, len);
     // we always pass mode=0 per upstream.
