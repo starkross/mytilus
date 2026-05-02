@@ -131,7 +131,9 @@ jobs:
           repo-token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Build mytilus
-        run: task build
+        run: |
+          task build
+          task startup:crt
 
       - name: Stage mytilus sysroot
         run: |
