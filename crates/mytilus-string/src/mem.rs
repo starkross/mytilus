@@ -1,19 +1,55 @@
 //! `memcpy` / `memmove` / `memset` / `memcmp`.
 //!
-//! TODO(perf): replace these byte loops with the upstream `aarch64/memcpy.S`
-//! and `aarch64/memset.S` (and a tuned memmove/memcmp) once the asm-build
-//! plumbing is in place. PLAN.md keeps these as handwritten asm for the
-//! release configuration; this crate just needs to ship correct symbols
-//! so the linker stops complaining.
+//! Two implementations live here:
+//!   - **Cross target** (aarch64-linux-mytilus): the canonical `memcpy` and
+//!     `memset` symbols are defined by hand-tuned aarch64 assembly ported
+//!     verbatim from upstream musl (`asm/{memcpy,memset}.S`). `memmove` and
+//!     `memcmp` use the byte-loop Rust impl below — upstream doesn't ship
+//!     tuned aarch64 versions of those, so the byte loops are correct and
+//!     "good enough" until profiling demands otherwise.
+//!   - **Host** (macOS / x86_64-linux for tests + IDE): the byte-loop Rust
+//!     impls below are the only thing built. They're cfg-gated to
+//!     `not(target_env = "musl")` so they don't conflict with the asm
+//!     symbols on cross. Tests reach them via the Rust path
+//!     `crate::mem::{memcpy, memmove, memset, memcmp}`.
+//!
+//! TODO(perf): port a tuned aarch64 `memmove` / `memcmp` if profiling
+//! shows them on a hot path. Upstream's generic C versions (used on
+//! arches without dedicated asm) use a SWAR / word-stride scheme; there
+//! are no upstream `aarch64/{memmove,memcmp}.S` files to crib from.
 
 use mytilus_sys::ctypes::{c_int, c_void, size_t};
+
+// ---------------------------------------------------------------------------
+// Cross target: pull in the upstream aarch64 asm. Both `memcpy` and `memset`
+// are defined as `.global` symbols there and become the canonical export.
+// ---------------------------------------------------------------------------
+
+#[cfg(all(target_arch = "aarch64", target_os = "linux", target_env = "musl"))]
+core::arch::global_asm!(include_str!("../asm/memcpy.S"));
+
+#[cfg(all(target_arch = "aarch64", target_os = "linux", target_env = "musl"))]
+core::arch::global_asm!(include_str!("../asm/memset.S"));
+
+// Rust callers in this crate (or downstream Rust users on cross) reach the
+// asm-defined symbols via these declarations.
+#[cfg(all(target_arch = "aarch64", target_os = "linux", target_env = "musl"))]
+unsafe extern "C" {
+    pub fn memcpy(dest: *mut c_void, src: *const c_void, n: size_t) -> *mut c_void;
+    pub fn memset(dest: *mut c_void, c: c_int, n: size_t) -> *mut c_void;
+}
+
+// ---------------------------------------------------------------------------
+// Host: byte-loop Rust impl. Mangled (no `#[no_mangle]`) so it doesn't shadow
+// libsystem's `memcpy`/`memset` in test binaries.
+// ---------------------------------------------------------------------------
 
 /// `void *memcpy(void *restrict dest, const void *restrict src, size_t n)`
 ///
 /// # Safety
 /// `dest` and `src` must each point to at least `n` writable / readable
 /// bytes, and the regions must not overlap. Use `memmove` for overlap.
-#[cfg_attr(target_env = "musl", no_mangle)]
+#[cfg(not(target_env = "musl"))]
 pub unsafe extern "C" fn memcpy(dest: *mut c_void, src: *const c_void, n: size_t) -> *mut c_void {
     let d = dest as *mut u8;
     let s = src as *const u8;
@@ -68,7 +104,7 @@ pub unsafe extern "C" fn memmove(dest: *mut c_void, src: *const c_void, n: size_
 ///
 /// # Safety
 /// `dest` must point to at least `n` writable bytes.
-#[cfg_attr(target_env = "musl", no_mangle)]
+#[cfg(not(target_env = "musl"))]
 pub unsafe extern "C" fn memset(dest: *mut c_void, c: c_int, n: size_t) -> *mut c_void {
     let d = dest as *mut u8;
     let byte = c as u8;

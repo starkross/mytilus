@@ -17,7 +17,8 @@ syscall wrappers), `mytilus-locale` (Phase 1: ctype subset),
 `mytilus-unistd` (Phase 1: sleep/usleep/pause/dup family/getpagesize/sync
 family — first cross-crate-symbol consumer), workspace-wide symbol-gating
 refactor (`cfg(not(test)) → cfg(target_env = "musl")`),
-`mytilus-startup` (Phase 1: setjmp/longjmp + first handwritten asm).
+`mytilus-startup` (Phase 1: setjmp/longjmp + first handwritten asm),
+`mytilus-string` Phase 4 (memcpy.S/memset.S — first asm port at scale).
 
 ### Workspace conventions discovered/locked-in
 
@@ -121,7 +122,20 @@ refactor (`cfg(not(test)) → cfg(target_env = "musl")`),
   cfg-gated to the cross target (`cfg(all(target_arch = "aarch64",
   target_os = "linux"))`) — otherwise host builds fail to assemble
   aarch64-only mnemonics. Same pattern works for every future `.S`
-  port (memcpy.S, memset.S, syscall_cp.S, dlstart, clone.s).
+  port (`syscall_cp.S`, `dlstart`, `clone.s`).
+- **C preprocessor `#define`s in upstream `.S` files**: LLVM's IA does
+  NOT run the C preprocessor, so upstream files using `#define` register
+  aliases (`#define dstin x0`, etc.) need translation. The clean fix is
+  to convert each `#define X Y` into a GAS `.req` directive (`X .req Y`)
+  at the top of the file, then `.unreq X` at the end so the alias
+  doesn't leak into other `global_asm!` invocations concatenated into
+  the same translation unit. Used for `memcpy.S` / `memset.S`. Note
+  that `.req` only aliases full registers — for cross-aliased macros
+  (e.g. upstream's `G_l = count`, where `count` is itself an alias),
+  resolve to the underlying physical register directly.
+- **`#ifdef`/`#ifndef` in upstream `.S`**: same problem (no CPP). For
+  `memset.S`'s `#ifndef SKIP_ZVA_CHECK` we just dropped the guards
+  since we always include the ZVA path.
 - **Variadic FFI (`#![feature(c_variadic)]`)**: declare the function with
   trailing `mut args: ...`, then `args.arg::<T>()` extracts one variadic
   slot at a time. Default argument promotion still applies on the C side
@@ -180,9 +194,17 @@ serde definitions. Fixed:
   before the fork wrapper exists.
 
 #### `mytilus-string`
-- `mem*` functions are byte loops; tagged `TODO(perf)` to swap with
+- ~~`mem*` functions are byte loops; tagged `TODO(perf)` to swap with
   upstream `aarch64/memcpy.S`/`memset.S` when the asm-build plumbing
-  lands.
+  lands.~~ **RESOLVED**: `memcpy` and `memset` now use upstream's
+  hand-tuned aarch64 asm on the cross target (~396 B / ~196 B of code
+  respectively, vs. 28 B / 24 B for the old byte loops — ~14× larger
+  but order-of-magnitude faster on big copies). The asm files are
+  ported verbatim with `#define` macros translated to `.req`
+  directives. Byte-loop Rust impls remain on host (cfg-gated to
+  `not(target_env = "musl")`) for unit tests. `memmove` and `memcmp`
+  stay as byte-loop Rust on both targets — upstream doesn't ship
+  tuned aarch64 versions of those.
 - `strstr` is naive O(n·m); upstream uses Crochemore–Perrin Two-Way for
   ≥5-byte needles plus 2/3/4-byte rolling-hash specializations.
   ~150 LOC of tricky code; deferred until something benchmarks slow.
