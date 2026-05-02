@@ -105,7 +105,7 @@ jobs:
         run: task build
 
   # ──────────────────────────────────────────────────────────────────────
-  # Real-world canary: try to build runc against mytilus as libc.
+  # Real-world canary: try to dynamically build runc against mytilus as libc.
   # This is intentionally non-blocking while `task install` and the libc
   # artifacts are still placeholders; once mytilus produces libc.a, crt*.o,
   # and headers, drop `continue-on-error` and let this become a hard gate.
@@ -141,12 +141,19 @@ jobs:
           mkdir -p "${MYTILUS_PREFIX}/bin" "${MYTILUS_PREFIX}/lib" "${MYTILUS_PREFIX}/include"
 
           missing=()
-          for artifact in libc.a crt1.o crti.o crtn.o Scrt1.o rcrt1.o; do
+          for artifact in libc.so crt1.o crti.o crtn.o Scrt1.o; do
             path="$(find target/aarch64-unknown-linux-mytilus/release -name "${artifact}" -print -quit)"
             if [ -n "${path}" ]; then
               cp "${path}" "${MYTILUS_PREFIX}/lib/${artifact}"
             else
               missing+=("${artifact}")
+            fi
+          done
+
+          for artifact in libc.a rcrt1.o; do
+            path="$(find target/aarch64-unknown-linux-mytilus/release -name "${artifact}" -print -quit)"
+            if [ -n "${path}" ]; then
+              cp "${path}" "${MYTILUS_PREFIX}/lib/${artifact}"
             fi
           done
 
@@ -156,6 +163,7 @@ jobs:
             printf '::warning::Skipping runc canary; mytilus sysroot is missing: %s\n' "${missing[*]}"
             echo "MYTILUS_SYSROOT_READY=false" >> "${GITHUB_ENV}"
           else
+            ln -sf libc.so "${MYTILUS_PREFIX}/lib/ld-musl-aarch64.so.1"
             echo "MYTILUS_SYSROOT_READY=true" >> "${GITHUB_ENV}"
           fi
 
@@ -185,18 +193,36 @@ jobs:
           #!/usr/bin/env bash
           set -euo pipefail
           prefix="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-          exec clang \
-            --target=aarch64-unknown-linux-musl \
-            -fuse-ld=lld \
-            -nostdinc \
-            -isystem "${prefix}/include" \
-            -B "${prefix}/lib" \
-            -L "${prefix}/lib" \
-            "$@"
+
+          link=1
+          for arg in "$@"; do
+            case "${arg}" in
+              -c|-S|-E|-M|-MM)
+                link=0
+                ;;
+            esac
+          done
+
+          args=(
+            --target=aarch64-unknown-linux-musl
+            -nostdinc
+            -isystem "${prefix}/include"
+            -B "${prefix}/lib"
+          )
+
+          if [ "${link}" -eq 1 ]; then
+            args+=(
+              -fuse-ld=lld
+              -L "${prefix}/lib"
+              -Wl,--dynamic-linker=/lib/ld-musl-aarch64.so.1
+            )
+          fi
+
+          exec clang "${args[@]}" "$@"
           EOF
           chmod +x "${MYTILUS_PREFIX}/bin/aarch64-linux-mytilus-clang"
 
-      - name: Build runc with mytilus libc
+      - name: Dynamically build runc with mytilus libc
         if: env.MYTILUS_SYSROOT_READY == 'true'
         working-directory: _runc
         env:
@@ -205,4 +231,4 @@ jobs:
           GOARCH: arm64
           CC: ${{ env.MYTILUS_PREFIX }}/bin/aarch64-linux-mytilus-clang
           RUNC_BUILDTAGS: runc_nocriu -seccomp -libpathrs
-        run: make static
+        run: make runc
