@@ -12,9 +12,10 @@
 //! `open(path, flags, mode)` routes through `openat(AT_FDCWD, …)`. Upstream
 //! does the same via `__sys_open_cp`.
 //!
-//! TODO(thread/cancel): upstream wraps the kernel call in `__syscall_cp`
-//! (cancellation point) for `open`/`openat`/`fcntl(F_SETLKW)`. We use plain
-//! `svc`. Switch when `mytilus-thread`'s asm lands.
+//! Cancellation: `open`, `openat`, and `fcntl(F_SETLKW)` are cancellation
+//! points upstream. They route through `mytilus_sys::syscall::syscall_cp_N`,
+//! which goes through `__syscall_cp_asm`. Until `mytilus-thread` provides
+//! a real cancel flag, the asm's cancel-branch is never taken.
 //!
 //! TODO(compat): we drop two upstream workarounds for old kernels. Both
 //! TODOs sit inside `fcntl` body:
@@ -38,7 +39,7 @@ extern crate mytilus_errno;
 
 use mytilus_sys::ctypes::{c_char, c_int, c_long, c_ulong, mode_t, off_t};
 use mytilus_sys::nr::*;
-use mytilus_sys::syscall::{ret, syscall3, syscall4};
+use mytilus_sys::syscall::{ret, syscall3, syscall4, syscall_cp3, syscall_cp4};
 
 // ---------------------------------------------------------------------------
 // Constants — kernel ABI for AArch64 Linux. Values match `<bits/fcntl.h>`
@@ -130,10 +131,11 @@ pub const POSIX_FADV_NOREUSE: c_int = 5;
 /// `filename` must point to a NUL-terminated path.
 #[inline]
 unsafe fn openat_inner(dirfd: c_int, filename: *const c_char, flags: c_int, mode: mode_t) -> c_int {
-    // SAFETY: forwards to the kernel.
-    // TODO(thread/cancel): switch to __syscall_cp once mytilus-thread lands.
+    // SAFETY: openat is a cancellation point upstream — route through
+    // syscall_cp4. The asm's cancel-branch is dead code until mytilus-thread
+    // provides a real cancel flag.
     let fd = unsafe {
-        syscall4(
+        syscall_cp4(
             SYS_openat,
             dirfd as c_long,
             filename as c_long,
@@ -225,14 +227,21 @@ pub unsafe extern "C" fn fcntl(fd: c_int, cmd: c_int, mut args: ...) -> c_int {
     if cmd == F_SETFL {
         arg |= O_LARGEFILE as c_ulong;
     }
-    // TODO(thread/cancel): F_SETLKW is a cancellation point upstream.
     // TODO(compat): F_GETOWN upstream fakes via F_GETOWN_EX to handle
     //   process-group return ambiguity; we pass through.
     // TODO(compat): F_DUPFD_CLOEXEC upstream falls back to F_DUPFD + F_SETFD
     //   on old kernels; we pass through.
 
-    // SAFETY: forwards to the kernel.
-    let r = unsafe { syscall3(SYS_fcntl, fd as c_long, cmd as c_long, arg as c_long) };
+    // F_SETLKW is the only cancellation-point cmd in fcntl — route it
+    // through syscall_cp3. All other cmds go through plain syscall3.
+    // SAFETY: pure kernel call in either branch.
+    let r = unsafe {
+        if cmd == F_SETLKW {
+            syscall_cp3(SYS_fcntl, fd as c_long, cmd as c_long, arg as c_long)
+        } else {
+            syscall3(SYS_fcntl, fd as c_long, cmd as c_long, arg as c_long)
+        }
+    };
     // SAFETY: ret() classifies.
     unsafe { ret(r) as c_int }
 }

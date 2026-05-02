@@ -37,7 +37,7 @@ extern crate mytilus_errno;
 use mytilus_sys::ctypes::{c_int, c_long, c_uchar, c_void, off_t, size_t};
 use mytilus_sys::errno_raw::{EINVAL, ENOMEM, EPERM};
 use mytilus_sys::nr::*;
-use mytilus_sys::syscall::{ret, syscall1, syscall2, syscall3, syscall5, syscall6};
+use mytilus_sys::syscall::{ret, syscall1, syscall2, syscall3, syscall5, syscall6, syscall_cp3};
 
 // ---------------------------------------------------------------------------
 // Constants — kernel ABI for AArch64 Linux. Values must match `bits/mman.h`
@@ -274,12 +274,11 @@ pub unsafe extern "C" fn mremap(
 /// `addr` must point to a mapped region of length `length`.
 #[cfg_attr(target_env = "musl", no_mangle)]
 pub unsafe extern "C" fn msync(addr: *mut c_void, length: size_t, flags: c_int) -> c_int {
-    // Note: upstream uses `syscall_cp` (cancellation-point variant) here.
-    // We call the regular svc; cancellation isn't wired up yet and msync
-    // without it is functionally correct for non-cancellable callers.
-    // TODO(thread): switch to __syscall_cp once mytilus-thread's asm lands.
-    // SAFETY: forwards to the kernel.
-    let r = unsafe { syscall3(SYS_msync, addr as c_long, length as c_long, flags as c_long) };
+    // Cancellation point upstream — routed through syscall_cp3. The asm's
+    // cancel-branch is never taken until mytilus-thread provides a real
+    // cancel flag (currently DUMMY_CANCEL = 0).
+    // SAFETY: forwards to the kernel via __syscall_cp_asm.
+    let r = unsafe { syscall_cp3(SYS_msync, addr as c_long, length as c_long, flags as c_long) };
     // SAFETY: ret() classifies.
     unsafe { ret(r) as c_int }
 }
