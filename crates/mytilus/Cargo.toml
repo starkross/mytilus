@@ -12,7 +12,7 @@ workspace = true
 
 [lib]
 name = "c"
-# crate-type = ["cdylib", "staticlib", "rlib"]  # enable once a panic_handler is wired
+crate-type = ["cdylib", "staticlib", "rlib"]
 
 [dependencies]
 mytilus-sys.path = "../mytilus-sys"

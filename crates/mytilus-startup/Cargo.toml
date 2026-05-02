@@ -13,6 +13,44 @@ workspace = true
 [lib]
 name = "mytilus_startup"
 
+[features]
+crt-artifacts = []
+
+[[bin]]
+name = "mytilus-crt1"
+path = "crt/aarch64/crt1.rs"
+required-features = ["crt-artifacts"]
+test = false
+bench = false
+
+[[bin]]
+name = "mytilus-Scrt1"
+path = "crt/aarch64/Scrt1.rs"
+required-features = ["crt-artifacts"]
+test = false
+bench = false
+
+[[bin]]
+name = "mytilus-rcrt1"
+path = "crt/aarch64/rcrt1.rs"
+required-features = ["crt-artifacts"]
+test = false
+bench = false
+
+[[bin]]
+name = "mytilus-crti"
+path = "crt/aarch64/crti.rs"
+required-features = ["crt-artifacts"]
+test = false
+bench = false
+
+[[bin]]
+name = "mytilus-crtn"
+path = "crt/aarch64/crtn.rs"
+required-features = ["crt-artifacts"]
+test = false
+bench = false
+
 
 [dependencies]
 mytilus-sys.path = "../mytilus-sys"

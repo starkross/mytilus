@@ -41,6 +41,16 @@ tasks:
       - cargo build --profile release-perf --target {{.TARGET_SPEC}} {{.BUILD_STD}}
         -p mytilus-string -p mytilus-math -p mytilus-malloc
 
+  startup:crt:
+    desc: Build mytilus startup objects (crt1.o, crti.o, crtn.o, Scrt1.o, rcrt1.o)
+    cmds:
+      - mkdir -p target/{{.TARGET}}/release/crt
+      - cargo rustc -p mytilus-startup --features crt-artifacts --bin mytilus-crt1 --release --target {{.TARGET_SPEC}} {{.BUILD_STD}} -- --emit=obj=target/{{.TARGET}}/release/crt/crt1.o -C link-arg=--unresolved-symbols=ignore-all
+      - cargo rustc -p mytilus-startup --features crt-artifacts --bin mytilus-Scrt1 --release --target {{.TARGET_SPEC}} {{.BUILD_STD}} -- --emit=obj=target/{{.TARGET}}/release/crt/Scrt1.o -C link-arg=--unresolved-symbols=ignore-all
+      - cargo rustc -p mytilus-startup --features crt-artifacts --bin mytilus-rcrt1 --release --target {{.TARGET_SPEC}} {{.BUILD_STD}} -- --emit=obj=target/{{.TARGET}}/release/crt/rcrt1.o -C link-arg=--unresolved-symbols=ignore-all
+      - cargo rustc -p mytilus-startup --features crt-artifacts --bin mytilus-crti --release --target {{.TARGET_SPEC}} {{.BUILD_STD}} -- --emit=obj=target/{{.TARGET}}/release/crt/crti.o
+      - cargo rustc -p mytilus-startup --features crt-artifacts --bin mytilus-crtn --release --target {{.TARGET_SPEC}} {{.BUILD_STD}} -- --emit=obj=target/{{.TARGET}}/release/crt/crtn.o
+
   build:host:
     desc: Build the workspace on the host (sanity check, no cross)
     cmds:
@@ -120,10 +130,18 @@ tasks:
 
   install:
     desc: 'Stage libc.so / libc.a / crt*.o / headers into PREFIX (default ./dist)'
-    deps: [build]
     cmds:
+      - task: build
+      - task: startup:crt
       - mkdir -p {{.PREFIX}}/lib {{.PREFIX}}/include
-      - 'echo "TODO -- copy artifacts into {{.PREFIX}}"'
+      - cp target/{{.TARGET}}/release/libc.so {{.PREFIX}}/lib/libc.so
+      - cp target/{{.TARGET}}/release/libc.a {{.PREFIX}}/lib/libc.a
+      - cp target/{{.TARGET}}/release/crt/crt1.o {{.PREFIX}}/lib/crt1.o
+      - cp target/{{.TARGET}}/release/crt/crti.o {{.PREFIX}}/lib/crti.o
+      - cp target/{{.TARGET}}/release/crt/crtn.o {{.PREFIX}}/lib/crtn.o
+      - cp target/{{.TARGET}}/release/crt/Scrt1.o {{.PREFIX}}/lib/Scrt1.o
+      - cp target/{{.TARGET}}/release/crt/rcrt1.o {{.PREFIX}}/lib/rcrt1.o
+      - cp -R headers/. {{.PREFIX}}/include/
 
   headers:install:
     desc: Install C headers into PREFIX/include
