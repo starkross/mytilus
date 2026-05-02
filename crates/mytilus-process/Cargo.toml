@@ -16,7 +16,8 @@ name = "mytilus_process"
 
 [dependencies]
 mytilus-sys.path = "../mytilus-sys"
-mytilus-internal.path = "../mytilus-internal"
 mytilus-errno.path = "../mytilus-errno"
-mytilus-thread.path = "../mytilus-thread"
-mytilus-signal.path = "../mytilus-signal"
+# mytilus-internal/thread/signal return when fork/posix_spawn/wait* arrive
+# (they need the libc lock + Pthread struct + signal-mask save). Phase 1
+# ports just trivial syscall wrappers and only needs `c_*` types from
+# mytilus-sys plus errno's `__errno_location` for `ret()`.

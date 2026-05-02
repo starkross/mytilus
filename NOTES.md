@@ -19,7 +19,8 @@ family — first cross-crate-symbol consumer), workspace-wide symbol-gating
 refactor (`cfg(not(test)) → cfg(target_env = "musl")`),
 `mytilus-startup` (Phase 1: setjmp/longjmp + first handwritten asm),
 `mytilus-string` Phase 4 (memcpy.S/memset.S — first asm port at scale),
-`mytilus-unistd` Phase 2 (read/write/close/lseek — basic I/O).
+`mytilus-unistd` Phase 2 (read/write/close/lseek — basic I/O),
+`mytilus-process` (Phase 1: pid/uid/gid/exit/kill/sched_yield).
 
 ### Workspace conventions discovered/locked-in
 
@@ -223,7 +224,8 @@ serde definitions. Fixed:
   `mytilus-thread/src/asm/syscall_cp.S` per PLAN.md.
 - Syscall-number constants: populated lazily in `nr.rs` as consumers
   arrive. After this session: 11 mman + 6 time + 5 fcntl + 11 unistd
-  (= 33). We deliberately avoid pre-populating the full ~300-entry table.
+  + 14 process (= 47). We deliberately avoid pre-populating the full
+  ~300-entry table.
 - `task test:qemu` is required to actually run anything that hits a real
   syscall; pre-existing TODO in the Taskfile.
 
@@ -439,6 +441,32 @@ serde definitions. Fixed:
 - 7 NRs added to `mytilus-sys::nr`: `SYS_fcntl`, `SYS_fallocate`,
   `SYS_openat`, `SYS_close`, `SYS_fadvise64` (5 new this round; 2
   previously).
+
+#### `mytilus-process`
+- Phase 1 ports `getpid`, `getppid`, `getuid`, `geteuid`, `getgid`,
+  `getegid`, `getsid`, `getpgid`, `getpgrp`, `setpgid`, `setsid`, `kill`,
+  `_Exit` / `_exit`, `sched_yield` (15 C-ABI symbols, ~14 syscall sites).
+- **Identity calls bypass `ret()`**: `getpid`/`getppid`/`getuid`/
+  `geteuid`/`getgid`/`getegid` cannot fail on Linux. Upstream uses raw
+  `__syscall` (no `__syscall_ret`) — we mirror that. Direct `syscall0()
+  → cast` saves the errno-classification branch.
+- **`_Exit` upstream-defense pattern**: calls `SYS_exit_group` first
+  (terminates the whole process), then loops on `SYS_exit` (terminates
+  just the calling thread) defensively. Modern kernels always honor
+  `exit_group`, so the loop is dead code in practice — kept verbatim
+  from upstream. Marked `-> !` so Rust knows control never returns.
+- `getpgrp` is a userspace alias for `getpgid(0)` — same as upstream's
+  `__syscall(SYS_getpgid, 0)` shortcut, no `ret()`.
+- 14 NRs added to `mytilus-sys::nr`: `SYS_exit`, `SYS_exit_group`,
+  `SYS_sched_yield`, `SYS_kill`, `SYS_setpgid`, `SYS_getpgid`,
+  `SYS_getsid`, `SYS_setsid`, `SYS_getpid`, `SYS_getppid`, `SYS_getuid`,
+  `SYS_geteuid`, `SYS_getgid`, `SYS_getegid`.
+- **Step toward end-to-end demo**: with `_Exit` from this crate +
+  `write` from `mytilus-unistd` + `strlen` from `mytilus-string`,
+  a `_start` that does `write(1, "...", n); _Exit(0);` becomes
+  feasible — the missing pieces are the umbrella crate as a
+  `cdylib`/`staticlib` and the `qemu-aarch64` test runner (Taskfile
+  TODO).
 
 #### `mytilus-mman`
 - `__vm_wait()` is not called on `MAP_FIXED` / `MREMAP_FIXED`.
