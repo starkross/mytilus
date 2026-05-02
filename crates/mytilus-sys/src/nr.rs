@@ -61,6 +61,11 @@ pub const SYS_fadvise64: c_long = 223;
 
 pub const SYS_dup: c_long = 23;
 pub const SYS_dup3: c_long = 24;
+pub const SYS_lseek: c_long = 62;
+pub const SYS_read: c_long = 63;
+pub const SYS_write: c_long = 64;
+pub const SYS_pread64: c_long = 67;
+pub const SYS_pwrite64: c_long = 68;
 pub const SYS_ppoll: c_long = 73;
 pub const SYS_sync: c_long = 81;
 pub const SYS_fsync: c_long = 82;

@@ -18,7 +18,8 @@ syscall wrappers), `mytilus-locale` (Phase 1: ctype subset),
 family — first cross-crate-symbol consumer), workspace-wide symbol-gating
 refactor (`cfg(not(test)) → cfg(target_env = "musl")`),
 `mytilus-startup` (Phase 1: setjmp/longjmp + first handwritten asm),
-`mytilus-string` Phase 4 (memcpy.S/memset.S — first asm port at scale).
+`mytilus-string` Phase 4 (memcpy.S/memset.S — first asm port at scale),
+`mytilus-unistd` Phase 2 (read/write/close/lseek — basic I/O).
 
 ### Workspace conventions discovered/locked-in
 
@@ -221,8 +222,8 @@ serde definitions. Fixed:
   recognise the exact PC range. Belongs in
   `mytilus-thread/src/asm/syscall_cp.S` per PLAN.md.
 - Syscall-number constants: populated lazily in `nr.rs` as consumers
-  arrive. After this session: 11 mman + 6 time + 5 fcntl + 6 unistd
-  (= 28). We deliberately avoid pre-populating the full ~300-entry table.
+  arrive. After this session: 11 mman + 6 time + 5 fcntl + 11 unistd
+  (= 33). We deliberately avoid pre-populating the full ~300-entry table.
 - `task test:qemu` is required to actually run anything that hits a real
   syscall; pre-existing TODO in the Taskfile.
 
@@ -384,8 +385,29 @@ serde definitions. Fixed:
 - `TODO(thread/cancel)`: `pause`, `fsync`, `fdatasync` are cancellation
   points upstream. We use plain `svc`. Switch when `mytilus-thread`
   lands.
-- 6 NRs added to `mytilus-sys::nr`: `SYS_dup`, `SYS_dup3`, `SYS_ppoll`,
-  `SYS_sync`, `SYS_fsync`, `SYS_fdatasync`.
+- 6 NRs added to `mytilus-sys::nr` in Phase 1: `SYS_dup`, `SYS_dup3`,
+  `SYS_ppoll`, `SYS_sync`, `SYS_fsync`, `SYS_fdatasync`. Phase 2 adds
+  5 more: `SYS_lseek`, `SYS_read`, `SYS_write`, `SYS_pread64`,
+  `SYS_pwrite64` (the last two anticipate a future `pread`/`pwrite`).
+- **Phase 2 — basic I/O**: `read`, `write`, `close`, `lseek` / `__lseek`
+  (5 new C-ABI symbols). With `write` + already-ported `strlen`, a
+  downstream `puts(s) = write(1, s, strlen(s))` becomes possible — the
+  first end-to-end demo target on cross.
+- **`close` EINTR-to-success mapping**: per POSIX-2008, `close` returning
+  EINTR means "fd may or may not have been closed; behavior is
+  implementation-defined". Linux always closes the fd anyway, so musl
+  maps EINTR → 0 (success). We mirror that — otherwise callers retry
+  on a now-stale fd. Mis-porting silently breaks every consumer that
+  loops on EINTR.
+- **`__aio_close` skipped**: upstream calls a weak `__aio_close(fd)` to
+  cancel pending aio against the fd before closing. We skip — that
+  symbol is a no-op weak alias unless `mytilus-aio` is in use, and
+  `mytilus-aio` is empty. Tagged `TODO(aio)`.
+- **`lseek` on aarch64-LP64**: no 32-bit `_llseek` argument splitting
+  needed. `SYS_lseek` takes a 64-bit offset directly via one register.
+- All four new sites are cancellation points upstream — same
+  `TODO(thread/cancel)` story as everything else, will be resolved in
+  one stroke when `__syscall_cp.s` lands.
 
 #### `mytilus-fcntl`
 - Phase 1 ports `open`, `openat`, `creat`, `fcntl`, `posix_fadvise`,
