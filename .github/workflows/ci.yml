@@ -103,3 +103,88 @@ jobs:
 
       - name: task build
         run: task build
+
+  # ──────────────────────────────────────────────────────────────────────
+  # Real-world canary: try to build runc against mytilus as libc.
+  # This is intentionally non-blocking while `task install` and the libc
+  # artifacts are still placeholders; once mytilus produces libc.a, crt*.o,
+  # and headers, drop `continue-on-error` and let this become a hard gate.
+  # ──────────────────────────────────────────────────────────────────────
+  runc:
+    name: runc (mytilus libc canary)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    needs: cross
+    continue-on-error: true
+    env:
+      MYTILUS_PREFIX: ${{ github.workspace }}/dist/mytilus
+      RUNC_REF: main
+      RUNC_REPO: https://github.com/opencontainers/runc.git
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions-rust-lang/setup-rust-toolchain@v1
+
+      - uses: arduino/setup-task@v2
+        with:
+          version: 3.x
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build mytilus
+        run: task build
+
+      - name: Stage mytilus sysroot
+        run: |
+          set -euxo pipefail
+          mkdir -p "${MYTILUS_PREFIX}/bin" "${MYTILUS_PREFIX}/lib" "${MYTILUS_PREFIX}/include"
+
+          for artifact in libc.a crt1.o crti.o crtn.o Scrt1.o rcrt1.o; do
+            path="$(find target/aarch64-unknown-linux-mytilus/release -name "${artifact}" -print -quit)"
+            test -n "${path}"
+            cp "${path}" "${MYTILUS_PREFIX}/lib/${artifact}"
+          done
+
+          cp -a headers/. "${MYTILUS_PREFIX}/include/"
+
+      - name: Check out runc
+        run: |
+          set -euxo pipefail
+          git clone --depth 1 --branch "${RUNC_REF}" "${RUNC_REPO}" _runc
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: _runc/go.mod
+
+      - name: Install runc build tools
+        run: |
+          set -euxo pipefail
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends clang lld make pkg-config
+
+      - name: Create mytilus C compiler wrapper
+        run: |
+          set -euxo pipefail
+          cat > "${MYTILUS_PREFIX}/bin/aarch64-linux-mytilus-clang" <<'EOF'
+          #!/usr/bin/env bash
+          set -euo pipefail
+          prefix="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+          exec clang \
+            --target=aarch64-unknown-linux-musl \
+            -fuse-ld=lld \
+            -nostdinc \
+            -isystem "${prefix}/include" \
+            -B "${prefix}/lib" \
+            -L "${prefix}/lib" \
+            "$@"
+          EOF
+          chmod +x "${MYTILUS_PREFIX}/bin/aarch64-linux-mytilus-clang"
+
+      - name: Build runc with mytilus libc
+        working-directory: _runc
+        env:
+          CGO_ENABLED: 1
+          GOOS: linux
+          GOARCH: arm64
+          CC: ${{ env.MYTILUS_PREFIX }}/bin/aarch64-linux-mytilus-clang
+          RUNC_BUILDTAGS: runc_nocriu -seccomp -libpathrs
+        run: make static
