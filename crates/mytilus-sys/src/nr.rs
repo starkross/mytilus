@@ -70,3 +70,22 @@ pub const SYS_ppoll: c_long = 73;
 pub const SYS_sync: c_long = 81;
 pub const SYS_fsync: c_long = 82;
 pub const SYS_fdatasync: c_long = 83;
+
+// ---------------------------------------------------------------------------
+// process / pid / uid / gid / signal-delivery (consumed by mytilus-process)
+// ---------------------------------------------------------------------------
+
+pub const SYS_exit: c_long = 93;
+pub const SYS_exit_group: c_long = 94;
+pub const SYS_sched_yield: c_long = 124;
+pub const SYS_kill: c_long = 129;
+pub const SYS_setpgid: c_long = 154;
+pub const SYS_getpgid: c_long = 155;
+pub const SYS_getsid: c_long = 156;
+pub const SYS_setsid: c_long = 157;
+pub const SYS_getpid: c_long = 172;
+pub const SYS_getppid: c_long = 173;
+pub const SYS_getuid: c_long = 174;
+pub const SYS_geteuid: c_long = 175;
+pub const SYS_getgid: c_long = 176;
+pub const SYS_getegid: c_long = 177;
