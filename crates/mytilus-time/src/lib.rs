@@ -16,9 +16,13 @@
 //! auxv reader (`AT_SYSINFO_EHDR`) to find the vDSO base — wire it once
 //! `mytilus-startup` parses auxv.
 //!
-//! TODO(thread/cancel): upstream `clock_nanosleep` and `nanosleep` use
-//! `__syscall_cp` (cancellation-point variant). We use plain `svc`. Switch
-//! when `mytilus-thread`'s `__syscall_cp` asm lands.
+//! Cancellation: `clock_nanosleep`/`nanosleep` are cancellation points
+//! upstream. They route through `mytilus_sys::syscall::syscall_cp4`, which
+//! goes through `__syscall_cp_asm` (in `mytilus-sys/asm/syscall_cp.s`).
+//! Until `mytilus-thread` provides a real cancel flag, the asm's
+//! cancel-branch is never taken — `syscall_cp_4` is functionally identical
+//! to `syscall_4` for now, but the call site is correctly flagged so the
+//! swap to real cancellation is local to the asm/wrapper layer.
 //!
 //! Target: aarch64-unknown-linux, 64-bit only.
 
@@ -34,7 +38,7 @@ extern crate mytilus_errno;
 use mytilus_sys::ctypes::{c_int, c_long, c_void, clockid_t, suseconds_t, time_t};
 use mytilus_sys::errno_raw::EINVAL;
 use mytilus_sys::nr::*;
-use mytilus_sys::syscall::{ret, syscall2, syscall4};
+use mytilus_sys::syscall::{ret, syscall2, syscall_cp4};
 
 // ---------------------------------------------------------------------------
 // FFI types
@@ -160,10 +164,12 @@ pub unsafe extern "C" fn __clock_nanosleep(
     if clk == CLOCK_THREAD_CPUTIME_ID {
         return EINVAL;
     }
-    // SAFETY: forwards to the kernel.
-    // TODO(thread/cancel): switch to __syscall_cp once mytilus-thread lands.
+    // SAFETY: routes through `__syscall_cp_asm`. Until `mytilus-thread`
+    // provides a real cancel flag, the asm's cancel-branch is never taken
+    // (DUMMY_CANCEL = 0); the call site is now correctly flagged as a
+    // cancellation point so swapping to real cancellation is mechanical.
     let r = unsafe {
-        syscall4(
+        syscall_cp4(
             SYS_clock_nanosleep,
             clk as c_long,
             flags as c_long,

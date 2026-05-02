@@ -20,7 +20,8 @@ refactor (`cfg(not(test)) → cfg(target_env = "musl")`),
 `mytilus-startup` (Phase 1: setjmp/longjmp + first handwritten asm),
 `mytilus-string` Phase 4 (memcpy.S/memset.S — first asm port at scale),
 `mytilus-unistd` Phase 2 (read/write/close/lseek — basic I/O),
-`mytilus-process` (Phase 1: pid/uid/gid/exit/kill/sched_yield).
+`mytilus-process` (Phase 1: pid/uid/gid/exit/kill/sched_yield),
+`__syscall_cp.s` skeleton + 10 cancellation TODOs resolved.
 
 ### Workspace conventions discovered/locked-in
 
@@ -218,10 +219,24 @@ serde definitions. Fixed:
   musl is C-locale-only).
 
 #### `mytilus-sys`
-- `__syscall_cp` (cancellation-point variant) intentionally still missing
-  here. Must remain handwritten assembly so the cancel handler can
-  recognise the exact PC range. Belongs in
-  `mytilus-thread/src/asm/syscall_cp.S` per PLAN.md.
+- ~~`__syscall_cp` (cancellation-point variant) intentionally still
+  missing here.~~ **RESOLVED**: ported the skeleton at
+  `crates/mytilus-sys/asm/syscall_cp.s` (verbatim from upstream
+  `arch/aarch64/syscall_cp.s`). The Rust wrappers `syscall_cp_{0..6}`
+  mirror the plain `syscall_{0..6}`; they pass `&DUMMY_CANCEL` (= 0)
+  so the asm's `cbnz w0, __cp_cancel` branch is provably dead until
+  `mytilus-thread` provides a real per-thread cancel flag. The PC
+  markers (`__cp_begin` / `__cp_end` / `__cp_cancel`) are in place
+  for the eventual cancel handler. `__cancel` is a stub that calls
+  `SYS_exit_group` + `brk #0` defensively (unreachable while
+  DUMMY_CANCEL = 0). **10 cancellation TODOs across mman/time/fcntl/
+  unistd flipped** from `syscall_*` to `syscall_cp_*` in one batch
+  (msync, clock_nanosleep, openat_inner, fcntl(F_SETLKW), pause,
+  fsync, fdatasync, read, write, close) — every call site is now
+  correctly flagged so the swap to real cancellation is local to
+  `mytilus-sys/syscall.rs`. Eventual home of the asm is still
+  `mytilus-thread`; we host it here so the cp wrappers sit alongside
+  the plain ones.
 - Syscall-number constants: populated lazily in `nr.rs` as consumers
   arrive. After this session: 11 mman + 6 time + 5 fcntl + 11 unistd
   + 14 process (= 47). We deliberately avoid pre-populating the full

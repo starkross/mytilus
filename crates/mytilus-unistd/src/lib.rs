@@ -23,9 +23,13 @@
 //! `execve`/`vfork`, `nice`, `alarm`, `tcsetpgrp`, the user/group lookups,
 //! and a long tail of others. Most need malloc, fcntl, signals, or threads.
 //!
-//! TODO(thread/cancel): `pause`, `fsync`, `fdatasync`, `read`, `write`,
-//! `close` are cancellation points upstream (use `__syscall_cp`). We use
-//! plain `svc`. Switch when `mytilus-thread`'s asm lands.
+//! Cancellation: `pause`, `fsync`, `fdatasync`, `read`, `write`, `close`
+//! are cancellation points upstream. They route through
+//! `mytilus_sys::syscall::syscall_cp_N`, which goes through
+//! `__syscall_cp_asm`. Until `mytilus-thread` provides a real cancel flag,
+//! the asm's cancel-branch is never taken — the call sites are correctly
+//! flagged so the swap to real cancellation is local to the asm/wrapper
+//! layer.
 //!
 //! TODO(auxv): `getpagesize` returns 4096 unconditionally. When
 //! `mytilus-startup` parses auxv we should swap it for the real `AT_PAGESZ`
@@ -44,7 +48,9 @@ extern crate mytilus_errno;
 use mytilus_sys::ctypes::{c_int, c_long, c_uint, c_void, off_t, size_t, ssize_t, time_t};
 use mytilus_sys::errno_raw::EINTR;
 use mytilus_sys::nr::*;
-use mytilus_sys::syscall::{is_err, ret, syscall0, syscall1, syscall2, syscall3, syscall4};
+use mytilus_sys::syscall::{
+    is_err, ret, syscall0, syscall1, syscall2, syscall3, syscall_cp1, syscall_cp3, syscall_cp4,
+};
 use mytilus_time::{nanosleep, timespec};
 
 // ---------------------------------------------------------------------------
@@ -96,9 +102,9 @@ pub extern "C" fn usleep(useconds: c_uint) -> c_int {
 /// the documented equivalent (waits forever on a zero-length fd set).
 #[cfg_attr(target_env = "musl", no_mangle)]
 pub extern "C" fn pause() -> c_int {
-    // SAFETY: pure kernel call; no caller-supplied pointers (all NULL).
-    // TODO(thread/cancel): switch to __syscall_cp once mytilus-thread lands.
-    let r = unsafe { syscall4(SYS_ppoll, 0, 0, 0, 0) };
+    // SAFETY: cancellation point — routed through syscall_cp4. All four
+    // ppoll args are NULL/0 since `pause` is "wait forever on no fds".
+    let r = unsafe { syscall_cp4(SYS_ppoll, 0, 0, 0, 0) };
     // SAFETY: ret() classifies.
     unsafe { ret(r) as c_int }
 }
@@ -190,9 +196,8 @@ pub extern "C" fn sync() {
 /// `int fsync(int fd)`.
 #[cfg_attr(target_env = "musl", no_mangle)]
 pub extern "C" fn fsync(fd: c_int) -> c_int {
-    // SAFETY: pure kernel call.
-    // TODO(thread/cancel): cancellation point upstream.
-    let r = unsafe { syscall1(SYS_fsync, fd as c_long) };
+    // SAFETY: cancellation point — routed through syscall_cp1.
+    let r = unsafe { syscall_cp1(SYS_fsync, fd as c_long) };
     // SAFETY: ret() classifies.
     unsafe { ret(r) as c_int }
 }
@@ -200,9 +205,8 @@ pub extern "C" fn fsync(fd: c_int) -> c_int {
 /// `int fdatasync(int fd)`.
 #[cfg_attr(target_env = "musl", no_mangle)]
 pub extern "C" fn fdatasync(fd: c_int) -> c_int {
-    // SAFETY: pure kernel call.
-    // TODO(thread/cancel): cancellation point upstream.
-    let r = unsafe { syscall1(SYS_fdatasync, fd as c_long) };
+    // SAFETY: cancellation point — routed through syscall_cp1.
+    let r = unsafe { syscall_cp1(SYS_fdatasync, fd as c_long) };
     // SAFETY: ret() classifies.
     unsafe { ret(r) as c_int }
 }
@@ -211,9 +215,10 @@ pub extern "C" fn fdatasync(fd: c_int) -> c_int {
 // read / write / close / lseek  (Phase 2 — basic I/O)
 // ---------------------------------------------------------------------------
 //
-// All four are cancellation points upstream (use `__syscall_cp`). We use
-// plain `svc`. Tagged `TODO(thread/cancel)` per site; switch when
-// `mytilus-thread`'s `__syscall_cp` asm lands.
+// All four are cancellation points upstream — they route through
+// `syscall_cp_N`. Until `mytilus-thread` provides a real cancel flag, the
+// asm's cancel-branch is dead code (DUMMY_CANCEL = 0); the swap to real
+// cancellation is local to `mytilus-sys::syscall`.
 
 /// `ssize_t read(int fd, void *buf, size_t count)`.
 ///
@@ -221,9 +226,8 @@ pub extern "C" fn fdatasync(fd: c_int) -> c_int {
 /// `buf` must be writable for at least `count` bytes.
 #[cfg_attr(target_env = "musl", no_mangle)]
 pub unsafe extern "C" fn read(fd: c_int, buf: *mut c_void, count: size_t) -> ssize_t {
-    // SAFETY: forwards to kernel; `buf` is asserted writable for `count` bytes.
-    // TODO(thread/cancel): cancellation point upstream.
-    let r = unsafe { syscall3(SYS_read, fd as c_long, buf as c_long, count as c_long) };
+    // SAFETY: cancellation point — routed through syscall_cp3.
+    let r = unsafe { syscall_cp3(SYS_read, fd as c_long, buf as c_long, count as c_long) };
     // SAFETY: ret() classifies; success returns the byte count, fits in
     // ssize_t (= isize = i64 on LP64).
     unsafe { ret(r) as ssize_t }
@@ -235,9 +239,8 @@ pub unsafe extern "C" fn read(fd: c_int, buf: *mut c_void, count: size_t) -> ssi
 /// `buf` must be readable for at least `count` bytes.
 #[cfg_attr(target_env = "musl", no_mangle)]
 pub unsafe extern "C" fn write(fd: c_int, buf: *const c_void, count: size_t) -> ssize_t {
-    // SAFETY: forwards to kernel; `buf` is asserted readable for `count` bytes.
-    // TODO(thread/cancel): cancellation point upstream.
-    let r = unsafe { syscall3(SYS_write, fd as c_long, buf as c_long, count as c_long) };
+    // SAFETY: cancellation point — routed through syscall_cp3.
+    let r = unsafe { syscall_cp3(SYS_write, fd as c_long, buf as c_long, count as c_long) };
     // SAFETY: ret() classifies.
     unsafe { ret(r) as ssize_t }
 }
@@ -253,9 +256,8 @@ pub unsafe extern "C" fn write(fd: c_int, buf: *const c_void, count: size_t) -> 
 /// alias unless `mytilus-aio` is in use, and `mytilus-aio` is empty.
 #[cfg_attr(target_env = "musl", no_mangle)]
 pub extern "C" fn close(fd: c_int) -> c_int {
-    // SAFETY: pure kernel call; no caller-supplied pointers.
-    // TODO(thread/cancel): cancellation point upstream.
-    let r = unsafe { syscall1(SYS_close, fd as c_long) };
+    // SAFETY: cancellation point — routed through syscall_cp1.
+    let r = unsafe { syscall_cp1(SYS_close, fd as c_long) };
     // EINTR → 0 (success) per POSIX-2008.
     if r == -(EINTR as c_long) {
         return 0;
