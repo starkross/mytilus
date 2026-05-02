@@ -97,7 +97,7 @@ tasks:
   test:
     desc: Run host-side unit tests for crates that have them
     cmds:
-      - cargo test --workspace
+      - cargo test --workspace --exclude mytilus
 
   test:qemu:
     desc: Run target-side integration tests under qemu-user
