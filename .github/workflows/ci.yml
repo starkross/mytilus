@@ -103,3 +103,94 @@ jobs:
 
       - name: task build
         run: task build
+
+  # ──────────────────────────────────────────────────────────────────────
+  # Integration smoke: build runc as AArch64 Linux PIE, dynamically linked
+  # against our mytilus libc sysroot only (no host glibc/musl), using GCC.
+  # ──────────────────────────────────────────────────────────────────────
+  runc-mytilus:
+    name: runc (dynamic, mytilus libc only)
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    needs: [cross]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions-rust-lang/setup-rust-toolchain@v1
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: runc-mytilus
+
+      - uses: arduino/setup-task@v2
+        with:
+          version: 3.x
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Install cross toolchain + ELF tools (GCC, no clang)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            gcc-aarch64-linux-gnu \
+            binutils-aarch64-linux-gnu
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.23.x'
+
+      - name: Build and stage mytilus sysroot
+        env:
+          PREFIX: ${{ runner.temp }}/mytilus-sysroot
+        run: |
+          task install PREFIX="$PREFIX"
+          ln -sf libc.so "$PREFIX/lib/ld-musl-aarch64.so.1"
+
+      - name: Clone runc
+        run: git clone --depth 1 https://github.com/opencontainers/runc.git
+
+      - name: Build runc (AArch64, dynamic, external link to mytilus)
+        working-directory: runc
+        env:
+          SYSROOT: ${{ runner.temp }}/mytilus-sysroot
+          GOOS: linux
+          GOARCH: arm64
+          CGO_ENABLED: '1'
+          CC: aarch64-linux-gnu-gcc
+        run: |
+          set -euxo pipefail
+
+          # Force headers/libs/crt exclusively from our sysroot.
+          export CGO_CFLAGS="--sysroot=$SYSROOT -nostdinc -isystem $SYSROOT/include -fPIC"
+          export CGO_CPPFLAGS="$CGO_CFLAGS"
+
+          # External linker flags: dynamic PIE with our loader + libc only.
+          EXTLDFLAGS="--sysroot=$SYSROOT -nostdlib -L$SYSROOT/lib \
+            -Wl,--dynamic-linker=/lib/ld-musl-aarch64.so.1 \
+            -Wl,-rpath,/lib \
+            $SYSROOT/lib/crt1.o $SYSROOT/lib/crti.o $SYSROOT/lib/crtn.o \
+            -lc"
+
+          export CGO_LDFLAGS="$EXTLDFLAGS"
+
+          # netgo/osusergo avoids glibc NSS resolver/user lookups.
+          go build \
+            -trimpath \
+            -tags "netgo osusergo" \
+            -ldflags "-linkmode external -extld=$CC -extldflags '$EXTLDFLAGS'" \
+            -o runc \
+            ./.
+
+      - name: Verify dynamic linkage uses mytilus ABI only
+        working-directory: runc
+        run: |
+          set -euxo pipefail
+          aarch64-linux-gnu-readelf -lW runc | grep 'Requesting program interpreter'
+          aarch64-linux-gnu-readelf -dW runc | grep NEEDED
+
+          # Must not pull glibc loader/libc sonames.
+          ! aarch64-linux-gnu-readelf -dW runc | grep -E 'libc\.so\.6|ld-linux|libpthread\.so\.0|libm\.so\.6|libgcc_s\.so'
+
+          # Must be linked as musl-style dynamic binary against libc.so.
+          aarch64-linux-gnu-readelf -dW runc | grep -E 'NEEDED.*libc\.so'
+          aarch64-linux-gnu-readelf -lW runc | grep -E 'Requesting program interpreter: /lib/ld-musl-aarch64\.so\.1'
