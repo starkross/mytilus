@@ -176,6 +176,7 @@ jobs:
           # Compile and link strictly against the staged mytilus-rs sysroot.
           exec clang \
             --target=aarch64-unknown-linux-musl \
+            -Qunused-arguments \
             -nostdinc \
             -isystem "${prefix}/include" \
             -B "${prefix}/lib" \
