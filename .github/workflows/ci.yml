@@ -103,3 +103,82 @@ jobs:
 
       - name: task build
         run: task build
+
+  # ──────────────────────────────────────────────────────────────────────
+  # Integration smoke test: build runc as a dynamically-linked aarch64
+  # binary against our libc artifacts only (no glibc/musl runtime deps).
+  # ──────────────────────────────────────────────────────────────────────
+  runc-muslrs:
+    name: runc (dynamic, musl-rs libc)
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    env:
+      SYSROOT: ${{ runner.temp }}/muslrs-sysroot
+      RUNC_VERSION: v1.2.5
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions-rust-lang/setup-rust-toolchain@v1
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: runc-muslrs
+
+      - uses: arduino/setup-task@v2
+        with:
+          version: 3.x
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.23.x'
+
+      - name: Install cross toolchain
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            gcc-aarch64-linux-gnu \
+            binutils-aarch64-linux-gnu
+
+      - name: Build and stage musl-rs libc sysroot
+        run: |
+          task install PREFIX="$SYSROOT"
+          ln -sf libc.so "$SYSROOT/lib/ld-musl-aarch64.so.1"
+
+      - name: Checkout runc
+        run: |
+          git clone --depth 1 --branch "$RUNC_VERSION" https://github.com/opencontainers/runc.git "$RUNNER_TEMP/runc"
+
+      - name: Build runc (aarch64, dynamic, libc=musl-rs)
+        working-directory: ${{ runner.temp }}/runc
+        env:
+          CGO_ENABLED: '1'
+          GOOS: linux
+          GOARCH: arm64
+          CC: aarch64-linux-gnu-gcc
+          CGO_CPPFLAGS: --sysroot=${{ env.SYSROOT }} -isystem ${{ env.SYSROOT }}/include
+          CGO_CFLAGS: --sysroot=${{ env.SYSROOT }} -isystem ${{ env.SYSROOT }}/include
+          CGO_LDFLAGS: >-
+            --sysroot=${{ env.SYSROOT }}
+            -L${{ env.SYSROOT }}/lib
+            -B${{ env.SYSROOT }}/lib
+            -Wl,--dynamic-linker=/lib/ld-musl-aarch64.so.1
+            -Wl,-rpath,/lib
+            -Wl,-rpath-link,${{ env.SYSROOT }}/lib
+        run: |
+          go build -trimpath -ldflags "-linkmode external" -o runc ./
+
+      - name: Verify runtime linker and NEEDED deps
+        working-directory: ${{ runner.temp }}/runc
+        run: |
+          set -euxo pipefail
+          aarch64-linux-gnu-readelf -lW runc | tee /tmp/runc-program-headers.txt
+          grep -F "Requesting program interpreter: /lib/ld-musl-aarch64.so.1" /tmp/runc-program-headers.txt
+
+          aarch64-linux-gnu-readelf -dW runc | tee /tmp/runc-dynamic.txt
+          grep -F "Shared library: [libc.so]" /tmp/runc-dynamic.txt
+
+          if grep -E "libc\.so\.6|ld-linux|musl" /tmp/runc-dynamic.txt; then
+            echo "unexpected glibc/musl runtime dependency found"
+            exit 1
+          fi
