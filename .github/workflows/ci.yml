@@ -155,7 +155,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           repository: bminor/musl
-          path: /tmp/musl-src
+          path: musl-src
           fetch-depth: 1
 
       # Populate C headers from upstream musl. These are pure API
@@ -166,7 +166,7 @@ jobs:
         run: |
           SYSROOT="$GITHUB_WORKSPACE/dist"
 
-          cd /tmp/musl-src
+          cd "$GITHUB_WORKSPACE/musl-src"
 
           # --- Top-level and subdirectory headers (skip bits/ — handled below) ---
           rsync -a --exclude=bits include/ "$SYSROOT/include/"
