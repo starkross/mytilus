@@ -103,3 +103,112 @@ jobs:
 
       - name: task build
         run: task build
+
+  # ──────────────────────────────────────────────────────────────────────
+  # Build runc dynamically linked against ONLY mytilus libc.
+  #
+  # The point of this job is to prove that a real C-driven project can be
+  # produced with no upstream musl and no glibc anywhere in the link — the
+  # only libc symbol provider is our own libc.so.
+  #
+  # We use Ubuntu's `gcc-aarch64-linux-gnu` strictly as the compiler driver.
+  # Its bundled glibc sysroot is bypassed via `--sysroot=$SYSROOT`, so all
+  # headers, CRT objects, and the libc come from `task install`. The verify
+  # step then hard-fails if NEEDED contains any glibc / upstream-musl SONAME.
+  #
+  # This job will be red until the `headers/` tree and the symbol surface
+  # exposed by libc.so are complete enough for runc's cgo. That is the
+  # intended signal: the gate ratchets as mytilus matures.
+  # ──────────────────────────────────────────────────────────────────────
+  build-runc:
+    name: build-runc (dynamic, mytilus-only libc)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions-rust-lang/setup-rust-toolchain@v1
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          # Reuse the cross job's target dir to avoid a second build-std.
+          shared-key: cross
+
+      - uses: arduino/setup-task@v2
+        with:
+          version: 3.x
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.22'
+
+      - name: Install aarch64 cross-compiler (GCC only)
+        # gcc-aarch64-linux-gnu ships its own glibc sysroot under
+        # /usr/aarch64-linux-gnu — we don't use it. `--sysroot` below points
+        # all header/library resolution at the mytilus dist instead.
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y gcc-aarch64-linux-gnu file binutils-aarch64-linux-gnu
+
+      - name: Stage mytilus sysroot
+        run: |
+          task install PREFIX="$GITHUB_WORKSPACE/dist"
+          # In musl, libc.so doubles as the program interpreter. Provide the
+          # canonical aarch64 name so PT_INTERP resolves at runtime.
+          ln -sfn libc.so "$GITHUB_WORKSPACE/dist/lib/ld-musl-aarch64.so.1"
+          echo "=== mytilus sysroot ==="
+          ls -la "$GITHUB_WORKSPACE/dist/lib"
+          ls -la "$GITHUB_WORKSPACE/dist/include" || true
+          aarch64-linux-gnu-readelf -d "$GITHUB_WORKSPACE/dist/lib/libc.so" | grep -E 'SONAME|NEEDED' || true
+
+      - name: Clone runc
+        run: |
+          git clone --depth 1 --branch v1.1.12 \
+            https://github.com/opencontainers/runc.git /tmp/runc
+
+      - name: Build runc against mytilus
+        env:
+          SYSROOT: ${{ github.workspace }}/dist
+        working-directory: /tmp/runc
+        run: |
+          # Compiler driver = host's aarch64 GCC. Sysroot = mytilus only.
+          # -nostdinc/-nostdlib would be ideal but cgo wants stdio.h etc.
+          # via the default search path; --sysroot redirects those there.
+          export CC="aarch64-linux-gnu-gcc --sysroot=$SYSROOT"
+          export CGO_ENABLED=1
+          export GOOS=linux
+          export GOARCH=arm64
+          export CGO_CFLAGS="-isystem $SYSROOT/include"
+          # Force the dynamic linker to the mytilus libc.so symlink, and
+          # carry an rpath so a CI run with only $SYSROOT/lib on disk
+          # still resolves NEEDED entries.
+          export CGO_LDFLAGS="-L$SYSROOT/lib \
+            -Wl,--dynamic-linker=/lib/ld-musl-aarch64.so.1 \
+            -Wl,-rpath=$SYSROOT/lib"
+          make BUILDTAGS=""
+
+      - name: Verify the binary links ONLY against mytilus
+        env:
+          SYSROOT: ${{ github.workspace }}/dist
+        run: |
+          BIN=/tmp/runc/runc
+          file "$BIN"
+          echo "=== PT_INTERP ==="
+          aarch64-linux-gnu-readelf -l "$BIN" | grep -E 'INTERP|Requesting' || true
+          echo "=== NEEDED ==="
+          aarch64-linux-gnu-readelf -d "$BIN" | grep NEEDED || true
+
+          # Hard gate: refuse glibc / upstream-musl in the final binary.
+          # Anything matching these SONAMEs means the link pulled in a
+          # libc we did not build.
+          BAD=$(aarch64-linux-gnu-readelf -d "$BIN" \
+            | grep NEEDED \
+            | grep -E 'libc\.so\.6|ld-linux|libpthread\.so\.0|libdl\.so\.2|librt\.so\.1|libm\.so\.6|libc\.musl-' \
+            || true)
+          if [ -n "$BAD" ]; then
+            echo "FAIL: foreign libc artifacts in NEEDED:" >&2
+            echo "$BAD" >&2
+            exit 1
+          fi
+          echo "OK: only mytilus libc is linked."
