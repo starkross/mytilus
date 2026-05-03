@@ -103,3 +103,188 @@ jobs:
 
       - name: task build
         run: task build
+
+  # ──────────────────────────────────────────────────────────────────────
+  # runc-against-mytilus: end-to-end "does a real-world C/Go program
+  # link and run against our libc?" smoke test.
+  #
+  # Rules of the game (per request):
+  #   - runc must be *dynamically* linked.
+  #   - The only shared library pulled in at runtime is our libc.so
+  #     (mytilus). No glibc, no upstream musl, no /lib/ld-musl-*.
+  #
+  # How we enforce that:
+  #   1. `task install PREFIX=dist` stages libc.so + crt{1,i,n}.o +
+  #      headers into ./dist. That directory is treated as a freestanding
+  #      mini-sysroot.
+  #   2. We build runc with CGO_ENABLED=1 (runc's seccomp / nsenter bits
+  #      need cgo) and route every C compile + link through a `mytilus-cc`
+  #      wrapper that calls clang with:
+  #         -nostdinc  -isystem <dist>/include      (only our headers)
+  #         -nostdlib  <dist>/lib/crt1.o crti.o crtn.o
+  #         -L<dist>/lib -lc                        (only our libc)
+  #         -Wl,--dynamic-linker=<dist>/lib/libc.so (our libc doubles as
+  #                                                  the ld.so, musl-style)
+  #         -Wl,-rpath,<dist>/lib                   (so the runner finds
+  #                                                  it without LD_*)
+  #   3. After the build, `readelf -d runc` must show *exactly one*
+  #      NEEDED entry pointing at our libc, and the PT_INTERP must be
+  #      our libc.so. The job fails otherwise.
+  #
+  # This job is expected to go red until the relevant subset of the libc
+  # (startup, pthread stubs, stdio, malloc, string, syscalls used by
+  # runc's cgo shims) is implemented. That's the whole point — it's a
+  # progress meter, not a gate.
+  # ──────────────────────────────────────────────────────────────────────
+  runc:
+    name: runc (dynamically linked against mytilus)
+    # Native aarch64 runner — mytilus is aarch64-only and we want to
+    # actually *execute* the resulting binary to prove the link is real.
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 40
+    # Don't block the whole CI matrix on this until the libc is further
+    # along. Flip `continue-on-error` off once the job goes green.
+    continue-on-error: true
+    needs: [cross]
+    env:
+      RUNC_REF: v1.2.4
+      MYTILUS_SYSROOT: ${{ github.workspace }}/dist
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions-rust-lang/setup-rust-toolchain@v1
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: cross
+
+      - uses: arduino/setup-task@v2
+        with:
+          version: 3.x
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Install clang + binutils (for aarch64-elf link + readelf)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends clang lld binutils
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.22'
+
+      # ── Build and stage our libc.so / crt*.o / headers into ./dist ──
+      - name: task install (stage mytilus into ./dist)
+        run: task install PREFIX=dist
+
+      - name: Show what we staged
+        run: |
+          ls -la dist/lib dist/include || true
+          file dist/lib/libc.so
+          readelf -d dist/lib/libc.so | head -40
+
+      # ── Tiny CC wrapper that pins clang at our mini-sysroot ──
+      #
+      # We intentionally do NOT use --sysroot= — that would pick up
+      # /usr/include/linux/... indirectly on some clang builds. Instead
+      # we go fully naked (-nostdinc -nostdlib) and add back only what's
+      # in dist/.
+      - name: Write mytilus-cc wrapper
+        run: |
+          mkdir -p "$HOME/.local/bin"
+          cat > "$HOME/.local/bin/mytilus-cc" <<'EOF'
+          #!/usr/bin/env bash
+          set -euo pipefail
+          : "${MYTILUS_SYSROOT:?MYTILUS_SYSROOT must be set}"
+          SYSROOT="$MYTILUS_SYSROOT"
+          exec clang \
+            --target=aarch64-unknown-linux-musl \
+            -fuse-ld=lld \
+            -nostdinc -isystem "$SYSROOT/include" \
+            -nostdlib \
+            "$SYSROOT/lib/crt1.o" "$SYSROOT/lib/crti.o" \
+            -L"$SYSROOT/lib" \
+            "$@" \
+            "$SYSROOT/lib/crtn.o" \
+            -lc \
+            -Wl,--dynamic-linker="$SYSROOT/lib/libc.so" \
+            -Wl,-rpath,"$SYSROOT/lib" \
+            -Wl,--no-undefined
+          EOF
+          chmod +x "$HOME/.local/bin/mytilus-cc"
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+
+      - name: Checkout runc ${{ env.RUNC_REF }}
+        uses: actions/checkout@v4
+        with:
+          repository: opencontainers/runc
+          ref: ${{ env.RUNC_REF }}
+          path: runc
+
+      # ── Build runc ──
+      #
+      # We force a dynamic build (no `static` build tag, no -extldflags
+      # "-static"). runc's Makefile honours CC/EXTRA_LDFLAGS; we pass our
+      # wrapper as CC so every cgo compile lands in our sysroot.
+      - name: Build runc against mytilus
+        working-directory: runc
+        env:
+          CGO_ENABLED: '1'
+          CC: mytilus-cc
+          GOOS: linux
+          GOARCH: arm64
+        run: |
+          # Drop any distro tags that would pull in libseccomp (extra
+          # .so NEEDED entries we don't want in the smoke test).
+          make BUILDTAGS= EXTRA_FLAGS='-buildmode=pie' runc
+          file runc
+
+      # ── Prove the link is clean ──
+      - name: Assert runc is dynamically linked against ONLY mytilus
+        working-directory: runc
+        run: |
+          set -euo pipefail
+          echo '── readelf -d runc ──'
+          readelf -d runc
+
+          # 1. Must be dynamically linked.
+          if ! file runc | grep -q 'dynamically linked'; then
+            echo '::error::runc is not dynamically linked'
+            exit 1
+          fi
+
+          # 2. PT_INTERP must point at our libc.so.
+          interp=$(readelf -l runc | awk '/interpreter:/ {gsub(/[][]/,"",$NF); print $NF}')
+          echo "PT_INTERP = $interp"
+          case "$interp" in
+            "$MYTILUS_SYSROOT/lib/libc.so") ;;
+            *) echo "::error::unexpected PT_INTERP: $interp"; exit 1 ;;
+          esac
+
+          # 3. Exactly one NEEDED entry, and it's our libc.
+          mapfile -t needed < <(readelf -d runc | awk '/\(NEEDED\)/ {gsub(/[][]/,"",$NF); print $NF}')
+          printf 'NEEDED entries:\n'; printf '  %s\n' "${needed[@]}"
+          if [ "${#needed[@]}" -ne 1 ]; then
+            echo "::error::expected exactly 1 NEEDED entry, got ${#needed[@]}"
+            exit 1
+          fi
+          case "${needed[0]}" in
+            libc.so) ;;
+            *) echo "::error::unexpected NEEDED: ${needed[0]}"; exit 1 ;;
+          esac
+
+          # 4. Absolutely no trace of glibc / upstream musl.
+          if readelf -d runc | grep -Eiq 'libc\.so\.6|ld-linux|ld-musl'; then
+            echo '::error::runc pulled in glibc or upstream musl'
+            readelf -d runc | grep -Ei 'libc\.so\.6|ld-linux|ld-musl'
+            exit 1
+          fi
+
+          echo 'OK: runc is dynamically linked against mytilus only.'
+
+      - name: Upload runc binary
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: runc-mytilus-aarch64
+          path: runc/runc
+          if-no-files-found: warn
