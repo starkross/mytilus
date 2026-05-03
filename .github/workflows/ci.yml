@@ -103,3 +103,98 @@ jobs:
 
       - name: task build
         run: task build
+
+  # ──────────────────────────────────────────────────────────────────────
+  # Integration smoke: build runc with our libc as the ONLY C runtime
+  # dependency (dynamic link).
+  #
+  # Requirements this checks on the produced aarch64 binary:
+  #   1) PT_INTERP = /lib/ld-musl-aarch64.so.1
+  #   2) No glibc / musl runtime NEEDED entries
+  #   3) libc dependency resolves to our staged libc.so
+  # ──────────────────────────────────────────────────────────────────────
+  runc:
+    name: runc (aarch64, dynamic, mytilus libc only)
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions-rust-lang/setup-rust-toolchain@v1
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: runc
+
+      - uses: arduino/setup-task@v2
+        with:
+          version: 3.x
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: 'stable'
+
+      - name: Install cross toolchain + ELF utils
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y gcc-aarch64-linux-gnu binutils-aarch64-linux-gnu
+
+      - name: Build and stage mytilus sysroot
+        env:
+          PREFIX: ${{ github.workspace }}/dist
+        run: |
+          task install
+          # musl-compatible loader name; in musl this is a symlink to libc.so.
+          ln -sf libc.so "$PREFIX/lib/ld-musl-aarch64.so.1"
+
+      - name: Clone runc
+        run: git clone --depth 1 https://github.com/opencontainers/runc.git _runc
+
+      - name: Build runc against staged mytilus libc (dynamic)
+        working-directory: _runc
+        env:
+          GOOS: linux
+          GOARCH: arm64
+          CGO_ENABLED: '1'
+          CC: aarch64-linux-gnu-gcc
+          SYSROOT: ${{ github.workspace }}/dist
+        run: |
+          go build \
+            -trimpath \
+            -o runc.mytilus \
+            -ldflags "-linkmode external -extldflags '--sysroot=${SYSROOT} -nostdlib -L${SYSROOT}/lib -Wl,--dynamic-linker=/lib/ld-musl-aarch64.so.1 -Wl,-rpath,/lib -lc'" \
+            ./
+
+      - name: Verify dynamic linkage policy (no glibc/musl; only our libc)
+        working-directory: _runc
+        run: |
+          set -euo pipefail
+
+          echo "== readelf: interpreter =="
+          aarch64-linux-gnu-readelf -lW runc.mytilus | tee interp.txt
+          grep -q "Requesting program interpreter: /lib/ld-musl-aarch64.so.1" interp.txt
+
+          echo "== readelf: dynamic deps =="
+          aarch64-linux-gnu-readelf -dW runc.mytilus | tee dynamic.txt
+
+          # Must not depend on glibc or a musl-provided libc soname.
+          if grep -Eq 'NEEDED.*(libc\.so\.6|ld-linux|libc\.musl|musl)' dynamic.txt; then
+            echo "unexpected glibc/musl dependency found"
+            exit 1
+          fi
+
+          # Must depend ONLY on plain libc.so (our staged soname).
+          mapfile -t needed < <(grep 'NEEDED' dynamic.txt | sed -E 's/.*\[(.*)\].*/\1/')
+          printf 'NEEDED: %s\n' "${needed[@]}"
+          test "${#needed[@]}" -eq 1
+          test "${needed[0]}" = "libc.so"
+
+      - name: Upload runc binary + ELF reports
+        uses: actions/upload-artifact@v4
+        with:
+          name: runc-mytilus-aarch64
+          path: |
+            _runc/runc.mytilus
+            _runc/interp.txt
+            _runc/dynamic.txt
