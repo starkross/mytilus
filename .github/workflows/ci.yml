@@ -103,3 +103,140 @@ jobs:
 
       - name: task build
         run: task build
+
+  # ──────────────────────────────────────────────────────────────────────
+  # Real-world integration: build runc (OCI container runtime) against
+  # mytilus libc. The resulting binary is dynamically linked and depends
+  # only on mytilus libc.so — no glibc, no upstream musl.
+  #
+  # Strategy:
+  #   1. Build mytilus (libc.so + libc.a + CRT objects) via `task install`.
+  #   2. Populate C headers from the upstream musl source tree (API
+  #      declarations only — zero implementation code). The actual libc
+  #      the binary links against at runtime is mytilus, exclusively.
+  #   3. Cross-compile runc (Go + CGO) with clang/lld targeting
+  #      aarch64-linux-musl and our sysroot.
+  # ──────────────────────────────────────────────────────────────────────
+  build-runc:
+    name: Build runc with mytilus
+    needs: cross
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions-rust-lang/setup-rust-toolchain@v1
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: runc
+
+      - uses: arduino/setup-task@v2
+        with:
+          version: 3.x
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Install cross-compilation toolchain
+        run: sudo apt-get update && sudo apt-get install -y clang lld
+
+      - name: Install Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.23'
+
+      # Build mytilus libc.so / libc.a / crt objects → dist/
+      - name: Build and install mytilus
+        run: task install
+
+      # Checkout upstream musl source (headers only — no implementation
+      # code is compiled; pure API declarations used for C type/macro
+      # definitions). The binary links exclusively against mytilus libc.so.
+      - name: Checkout musl headers
+        uses: actions/checkout@v4
+        with:
+          repository: bminor/musl
+          path: musl-src
+          fetch-depth: 1
+
+      # Populate C headers from upstream musl. These are pure API
+      # declarations (function signatures, type definitions, macro
+      # constants) — they contain no implementation code whatsoever.
+      # The binary links exclusively against mytilus libc.so.
+      - name: Prepare sysroot
+        run: |
+          SYSROOT="$GITHUB_WORKSPACE/dist"
+
+          cd "$GITHUB_WORKSPACE/musl-src"
+
+          # --- Top-level and subdirectory headers (skip bits/ — handled below) ---
+          rsync -a --exclude=bits include/ "$SYSROOT/include/"
+
+          # --- Arch-specific bit headers (aarch64) ---
+          mkdir -p "$SYSROOT/include/bits"
+          cp arch/aarch64/bits/*.h "$SYSROOT/include/bits/"
+
+          # --- Generic bit headers that aarch64 doesn't override ---
+          for f in arch/generic/bits/*.h; do
+            base="$(basename "$f")"
+            [ -f "$SYSROOT/include/bits/$base" ] || cp "$f" "$SYSROOT/include/bits/"
+          done
+
+          # --- Generate bits/alltypes.h from the .in template ---
+          sed -f tools/mkalltypes.sed \
+            arch/aarch64/bits/alltypes.h.in src/internal/alltypes.h.in \
+            > "$SYSROOT/include/bits/alltypes.h"
+
+          # --- ld-musl dynamic linker symlink ---
+          ln -sf libc.so "$SYSROOT/lib/ld-musl-aarch64.so.1"
+
+          # --- Virtual library linker scripts (musl folds everything into libc.so) ---
+          for lib in pthread dl m rt util; do
+            printf 'GROUP ( libc.so )\n' > "$SYSROOT/lib/lib$lib.so"
+          done
+
+      - name: Clone runc
+        run: git clone --depth 1 https://github.com/opencontainers/runc.git /tmp/runc
+
+      - name: Build runc dynamically linked against mytilus
+        working-directory: /tmp/runc
+        env:
+          CGO_ENABLED: 1
+          GOARCH: arm64
+          CC: clang
+          CGO_CFLAGS: "--target=aarch64-linux-musl --sysroot=${{ github.workspace }}/dist"
+          CGO_LDFLAGS: >-
+            --target=aarch64-linux-musl
+            --sysroot=${{ github.workspace }}/dist
+            -fuse-ld=lld
+            -Wl,--dynamic-linker=/lib/ld-musl-aarch64.so.1
+        run: make runc
+
+      - name: Verify runc binary
+        working-directory: /tmp/runc
+        run: |
+          echo '=== ELF header ==='
+          readelf -h runc | grep -E 'Class|Machine|Type'
+
+          echo '=== Dynamic section (NEEDED libraries) ==='
+          readelf -d runc | grep -E 'NEEDED|SONAME'
+
+          echo '=== ELF interpreter ==='
+          readelf -l runc | grep interpreter
+
+          # Must be an AArch64 PIE executable
+          if ! readelf -h runc | grep -q 'Machine:.*AArch64'; then
+            echo '::error::Expected AArch64 ELF'
+            exit 1
+          fi
+          if ! readelf -h runc | grep -q 'Type:.*DYN'; then
+            echo '::error::Expected DYN (PIE)'
+            exit 1
+          fi
+
+          # Must NOT link against glibc (libc.so.6)
+          if readelf -d runc | grep -q 'libc.so.6'; then
+            echo '::error::Binary links against glibc (libc.so.6)'
+            exit 1
+          fi
+
+          echo '✅ runc is a dynamically-linked AArch64 ELF against mytilus libc'
