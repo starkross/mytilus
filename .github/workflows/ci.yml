@@ -103,3 +103,110 @@ jobs:
 
       - name: task build
         run: task build
+
+  # ──────────────────────────────────────────────────────────────────────
+  # Real-world canary: dynamically build runc against mytilus-rs only.
+  # No host glibc, no host musl — the external linker is forced to consume
+  # only headers/crt/libs staged from this repository.
+  # ──────────────────────────────────────────────────────────────────────
+  runc:
+    name: runc (dynamic, mytilus-rs only)
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    needs: cross
+    env:
+      MYTILUS_PREFIX: ${{ github.workspace }}/dist/mytilus
+      RUNC_REF: main
+      RUNC_REPO: https://github.com/opencontainers/runc.git
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions-rust-lang/setup-rust-toolchain@v1
+
+      - uses: arduino/setup-task@v2
+        with:
+          version: 3.x
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and stage mytilus-rs sysroot
+        run: |
+          set -euxo pipefail
+          task build
+          task startup:crt
+          task install PREFIX="${MYTILUS_PREFIX}"
+
+          # musl compatibility aliases expected by external linkers/tooling.
+          ln -sf libc.so "${MYTILUS_PREFIX}/lib/ld-musl-aarch64.so.1"
+          ln -sf libc.so "${MYTILUS_PREFIX}/lib/libpthread.so"
+          ln -sf libc.so "${MYTILUS_PREFIX}/lib/libdl.so"
+          ln -sf libc.so "${MYTILUS_PREFIX}/lib/librt.so"
+          ln -sf libc.so "${MYTILUS_PREFIX}/lib/libm.so"
+          ln -sf libc.so "${MYTILUS_PREFIX}/lib/libutil.so"
+          ln -sf libc.a "${MYTILUS_PREFIX}/lib/libpthread.a"
+          ln -sf libc.a "${MYTILUS_PREFIX}/lib/libdl.a"
+          ln -sf libc.a "${MYTILUS_PREFIX}/lib/librt.a"
+          ln -sf libc.a "${MYTILUS_PREFIX}/lib/libm.a"
+          ln -sf libc.a "${MYTILUS_PREFIX}/lib/libutil.a"
+
+      - name: Check out runc
+        run: |
+          set -euxo pipefail
+          git clone --depth 1 --branch "${RUNC_REF}" "${RUNC_REPO}" _runc
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: _runc/go.mod
+
+      - name: Install runc build tools
+        run: |
+          set -euxo pipefail
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends clang lld make pkg-config binutils-aarch64-linux-gnu
+
+      - name: Create mytilus-rs C compiler wrapper
+        run: |
+          set -euxo pipefail
+          mkdir -p "${MYTILUS_PREFIX}/bin"
+          cat > "${MYTILUS_PREFIX}/bin/aarch64-linux-mytilus-clang" <<'EOF'
+          #!/usr/bin/env bash
+          set -euo pipefail
+
+          prefix="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+
+          # Compile and link strictly against the staged mytilus-rs sysroot.
+          exec clang \
+            --target=aarch64-unknown-linux-musl \
+            -Qunused-arguments \
+            -nostdlibinc \
+            -isystem "${prefix}/include" \
+            -B "${prefix}/lib" \
+            -L "${prefix}/lib" \
+            -fuse-ld=lld \
+            -Wl,--dynamic-linker=/lib/ld-musl-aarch64.so.1 \
+            "$@"
+          EOF
+          chmod +x "${MYTILUS_PREFIX}/bin/aarch64-linux-mytilus-clang"
+
+      - name: Dynamically build runc with mytilus-rs
+        working-directory: _runc
+        env:
+          CGO_ENABLED: 1
+          GOOS: linux
+          GOARCH: arm64
+          CC: ${{ env.MYTILUS_PREFIX }}/bin/aarch64-linux-mytilus-clang
+          RUNC_BUILDTAGS: runc_nocriu -seccomp -libpathrs
+        run: |
+          set -euxo pipefail
+          make runc
+
+      - name: Verify binary is dynamic and not glibc/musl-host linked
+        working-directory: _runc
+        run: |
+          set -euxo pipefail
+
+          # Must be dynamic and use musl loader path (provided by mytilus-rs).
+          aarch64-linux-gnu-readelf -l runc | grep -F 'Requesting program interpreter: /lib/ld-musl-aarch64.so.1'
+
+          # Hard exclude glibc/musl host signatures.
+          ! aarch64-linux-gnu-readelf -d runc | grep -F 'libc.so.6'
+          ! aarch64-linux-gnu-readelf -l runc | grep -E 'ld-linux|ld-musl-.*/usr|/lib64/'
