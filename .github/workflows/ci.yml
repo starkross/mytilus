@@ -103,3 +103,75 @@ jobs:
 
       - name: task build
         run: task build
+
+  # ──────────────────────────────────────────────────────────────────────
+  # Build runc dynamically linked against mytilus libc.
+  # The produced binary must resolve libc from this repository's sysroot,
+  # with no glibc and no external musl runtime in DT_NEEDED/PT_INTERP.
+  # ──────────────────────────────────────────────────────────────────────
+  runc-mytilus:
+    name: runc (dynamic, mytilus-only libc)
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions-rust-lang/setup-rust-toolchain@v1
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: cross
+
+      - uses: arduino/setup-task@v2
+        with:
+          version: 3.x
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and stage mytilus sysroot
+        run: |
+          task install PREFIX=./dist
+          # PT_INTERP for linux-musl expects ld-musl-aarch64.so.1.
+          # mytilus provides libc.so; expose the canonical loader alias.
+          ln -sf libc.so ./dist/lib/ld-musl-aarch64.so.1
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.22'
+
+      - name: Install clang + lld
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y clang lld llvm binutils-aarch64-linux-gnu
+
+      - name: Clone runc
+        run: |
+          git clone --depth 1 --branch v1.1.12 https://github.com/opencontainers/runc.git /tmp/runc
+
+      - name: Build runc against mytilus sysroot
+        env:
+          SYSROOT: ${{ github.workspace }}/dist
+        run: |
+          export CC="clang --target=aarch64-unknown-linux-musl --sysroot=$SYSROOT -fuse-ld=lld"
+          export CXX="clang++ --target=aarch64-unknown-linux-musl --sysroot=$SYSROOT -fuse-ld=lld"
+          export AR=llvm-ar
+          export CGO_ENABLED=1
+          export CGO_CFLAGS="--sysroot=$SYSROOT -I$SYSROOT/include"
+          export CGO_CPPFLAGS="--sysroot=$SYSROOT -I$SYSROOT/include"
+          export CGO_LDFLAGS="--sysroot=$SYSROOT -L$SYSROOT/lib -Wl,-rpath-link,$SYSROOT/lib -Wl,--dynamic-linker=/lib/ld-musl-aarch64.so.1"
+          make -C /tmp/runc BUILDTAGS="" GOOS=linux GOARCH=arm64
+
+      - name: Verify dynamic linker and dependencies
+        env:
+          BIN: /tmp/runc/runc
+        run: |
+          file "$BIN"
+          readelf -l "$BIN" | tee /tmp/runc.interp
+          readelf -d "$BIN" | tee /tmp/runc.dynamic
+
+          grep -q 'ld-musl-aarch64.so.1' /tmp/runc.interp
+          grep -q 'Shared library: \[libc.so\]' /tmp/runc.dynamic
+
+          if grep -E 'Shared library: \[(ld-linux|libc\.so\.6|libmusl)' /tmp/runc.dynamic; then
+            echo 'Found forbidden glibc/musl runtime dependency in runc binary.'
+            exit 1
+          fi
