@@ -177,7 +177,7 @@ jobs:
           exec clang \
             --target=aarch64-unknown-linux-musl \
             -Qunused-arguments \
-            -nostdinc \
+            -nostdlibinc \
             -isystem "${prefix}/include" \
             -B "${prefix}/lib" \
             -L "${prefix}/lib" \
