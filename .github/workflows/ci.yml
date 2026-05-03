@@ -103,3 +103,78 @@ jobs:
 
       - name: task build
         run: task build
+
+  # ──────────────────────────────────────────────────────────────────────
+  # Integration build: runc dynamically linked against mytilus only.
+  # This verifies we can build a real-world binary with cgo using our
+  # libc/sysroot, without pulling in host glibc or musl runtime libs.
+  # ──────────────────────────────────────────────────────────────────────
+  runc-mytilus:
+    name: runc (dynamic, mytilus-only libc)
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions-rust-lang/setup-rust-toolchain@v1
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.24.x"
+
+      - uses: arduino/setup-task@v2
+        with:
+          version: 3.x
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Install linker tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y clang lld llvm binutils-aarch64-linux-gnu make git pkg-config
+
+      - name: Build and stage mytilus sysroot
+        run: |
+          task install PREFIX="$RUNNER_TEMP/mytilus-sysroot"
+          # Temporary interpreter alias until mytilus-ldso ships as a real
+          # ld-musl-aarch64.so.1 artifact.
+          ln -sf libc.so "$RUNNER_TEMP/mytilus-sysroot/lib/ld-musl-aarch64.so.1"
+
+      - name: Build runc linked to mytilus libc
+        env:
+          SYSROOT: ${{ runner.temp }}/mytilus-sysroot
+        run: |
+          git clone --depth 1 https://github.com/opencontainers/runc.git "$RUNNER_TEMP/runc"
+          cd "$RUNNER_TEMP/runc"
+
+          cat > "$RUNNER_TEMP/cc-mytilus" <<'EOF'
+          #!/usr/bin/env bash
+          exec clang --target=aarch64-linux-musl --sysroot="$SYSROOT" "$@"
+          EOF
+          chmod +x "$RUNNER_TEMP/cc-mytilus"
+
+          export GOOS=linux
+          export GOARCH=arm64
+          export CGO_ENABLED=1
+          export CC="$RUNNER_TEMP/cc-mytilus"
+          export CXX="$RUNNER_TEMP/cc-mytilus"
+          export CGO_CFLAGS="--sysroot=$SYSROOT -I$SYSROOT/include"
+          export CGO_CPPFLAGS="$CGO_CFLAGS"
+          export CGO_LDFLAGS="--sysroot=$SYSROOT -L$SYSROOT/lib -Wl,--dynamic-linker=/lib/ld-musl-aarch64.so.1 -Wl,-rpath,/lib -Wl,--as-needed"
+
+          go build \
+            -o runc \
+            -buildmode=pie \
+            -ldflags='-linkmode external -extld='"$RUNNER_TEMP"'/cc-mytilus -extldflags "-fuse-ld=lld"' \
+            .
+
+      - name: Verify dynamic deps are mytilus-only
+        env:
+          SYSROOT: ${{ runner.temp }}/mytilus-sysroot
+        run: |
+          BIN="$RUNNER_TEMP/runc/runc"
+          aarch64-linux-gnu-readelf -l "$BIN" | grep -F 'Requesting program interpreter: /lib/ld-musl-aarch64.so.1'
+          aarch64-linux-gnu-readelf -d "$BIN" | grep -F '(NEEDED)' | grep -F 'libc.so'
+          if aarch64-linux-gnu-readelf -d "$BIN" | grep -E 'libc\.musl|ld-linux|libpthread|libm|libgcc_s|libstdc\+\+'; then
+            echo "unexpected non-mytilus runtime dependency detected"
+            exit 1
+          fi
