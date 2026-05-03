@@ -103,3 +103,154 @@ jobs:
 
       - name: task build
         run: task build
+
+  # ──────────────────────────────────────────────────────────────────────
+  # End-to-end: link a real-world C/Go project (runc) dynamically against
+  # our libc.so. The contract this job enforces is strict:
+  #
+  #   * runc's PT_INTERP (dynamic linker) must be our libc.so
+  #   * runc's only NEEDED libc must be our libc.so SONAME
+  #   * no glibc (libc.so.6 / ld-linux-*) and no foreign musl libc may
+  #     leak into the produced ELF
+  #
+  # We use musl.cc's aarch64-linux-musl-gcc as a *compiler driver only*.
+  # `--sysroot=$SYSROOT` redirects every crt, libc, and library lookup
+  # at the mytilus sysroot, so no musl libc.so / libc.a from the cross
+  # toolchain reaches the link line. Upstream musl C headers are
+  # overlaid into the sysroot to describe the ABI mytilus implements;
+  # headers don't ship in the binary, so the "only mytilus" guarantee
+  # holds at link/runtime — which is what `readelf` below verifies.
+  # ──────────────────────────────────────────────────────────────────────
+  build-runc:
+    name: build-runc (dynamic, mytilus-only)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    needs: cross
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions-rust-lang/setup-rust-toolchain@v1
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: cross
+
+      - uses: arduino/setup-task@v2
+        with:
+          version: 3.x
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.22'
+
+      - name: Stage mytilus sysroot
+        run: |
+          task install PREFIX="$GITHUB_WORKSPACE/dist"
+          # In the musl ABI, libc.so is also the dynamic linker. The
+          # canonical loader path on aarch64 musl is
+          # /lib/ld-musl-aarch64.so.1 — provide that name so the ELF
+          # we produce resolves PT_INTERP to mytilus when run inside
+          # a sysroot rooted at $GITHUB_WORKSPACE/dist.
+          ln -sf libc.so "$GITHUB_WORKSPACE/dist/lib/ld-musl-aarch64.so.1"
+
+      - name: Install aarch64-linux-musl cross-compiler (driver only)
+        run: |
+          curl -fsSL https://musl.cc/aarch64-linux-musl-cross.tgz \
+            | tar xz -C /tmp
+          echo "/tmp/aarch64-linux-musl-cross/bin" >> "$GITHUB_PATH"
+
+      - name: Overlay musl C headers into mytilus sysroot
+        # Headers describe the ABI; they don't end up in the binary.
+        # mytilus implements the musl ABI (env="musl" in the target
+        # spec), so musl headers are the right ABI description. Any
+        # header we ship under /headers wins via --ignore-existing.
+        run: |
+          rsync -a --ignore-existing \
+            /tmp/aarch64-linux-musl-cross/aarch64-linux-musl/include/ \
+            "$GITHUB_WORKSPACE/dist/include/"
+
+      - name: Clone runc
+        run: |
+          git clone --depth 1 --branch v1.1.12 \
+            https://github.com/opencontainers/runc.git /tmp/runc
+
+      - name: Build runc dynamically linked against mytilus libc
+        env:
+          SYSROOT: ${{ github.workspace }}/dist
+        working-directory: /tmp/runc
+        run: |
+          # --sysroot pins every crt*.o / libc.so lookup at $SYSROOT,
+          # so musl.cc's bundled libc never reaches the link line.
+          export CC="aarch64-linux-musl-gcc --sysroot=$SYSROOT"
+          export CGO_CFLAGS="--sysroot=$SYSROOT"
+          # Force PT_INTERP at the canonical musl loader path; the
+          # symlink staged above makes that resolve to our libc.so.
+          export CGO_LDFLAGS="--sysroot=$SYSROOT \
+            -Wl,--dynamic-linker=/lib/ld-musl-aarch64.so.1 \
+            -Wl,-rpath-link,$SYSROOT/lib"
+          export GOOS=linux GOARCH=arm64 CGO_ENABLED=1
+          # Default `runc` target: dynamic. (`make static` would force
+          # -extldflags=-static, which is the opposite of what we want.)
+          make runc BUILDTAGS=""
+
+      - name: Verify the binary depends only on mytilus
+        env:
+          SYSROOT: ${{ github.workspace }}/dist
+        run: |
+          set -euo pipefail
+          BIN=/tmp/runc/runc
+
+          echo "::group::file"
+          file "$BIN"
+          echo "::endgroup::"
+
+          echo "::group::PT_INTERP"
+          readelf -l "$BIN" | grep -E 'INTERP|Requesting'
+          echo "::endgroup::"
+
+          echo "::group::NEEDED"
+          readelf -d "$BIN" | grep NEEDED || true
+          echo "::endgroup::"
+
+          echo "::group::mytilus libc.so SONAME"
+          readelf -d "$SYSROOT/lib/libc.so" | grep SONAME || true
+          echo "::endgroup::"
+
+          # Hard gate 1: PT_INTERP points at the mytilus loader path.
+          interp=$(readelf -l "$BIN" \
+            | awk -F'[][]' '/Requesting program interpreter/ {print $2}')
+          echo "PT_INTERP: $interp"
+          if [ "$interp" != "/lib/ld-musl-aarch64.so.1" ]; then
+            echo "ERROR: unexpected PT_INTERP — expected mytilus loader"
+            exit 1
+          fi
+
+          # Hard gate 2: no glibc / foreign-loader leakage.
+          if readelf -d "$BIN" | grep -E 'libc\.so\.6|ld-linux'; then
+            echo "ERROR: glibc dependency leaked into runc"
+            exit 1
+          fi
+
+          # Hard gate 3: every NEEDED libc must match our SONAME.
+          # libgcc_s is acceptable — it's compiler runtime, not libc.
+          soname=$(readelf -d "$SYSROOT/lib/libc.so" \
+            | awk -F'[][]' '/SONAME/ {print $2}')
+          if [ -z "$soname" ]; then
+            echo "ERROR: mytilus libc.so has no SONAME"
+            exit 1
+          fi
+          echo "Expecting libc NEEDED == $soname"
+          while read -r dep; do
+            case "$dep" in
+              libc*|*musl*)
+                if [ "$dep" != "$soname" ]; then
+                  echo "ERROR: foreign libc NEEDED: $dep (want $soname)"
+                  exit 1
+                fi
+                ;;
+            esac
+          done < <(readelf -d "$BIN" \
+            | awk -F'[][]' '/NEEDED/ {print $2}')
+
+          echo "OK: runc links exclusively against mytilus libc"
