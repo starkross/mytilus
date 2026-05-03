@@ -103,3 +103,183 @@ jobs:
 
       - name: task build
         run: task build
+
+  # ──────────────────────────────────────────────────────────────────────
+  # Compatibility smoke-test: build runc dynamically linked against
+  # mytilus libc only — no glibc, no system musl. Validates that our
+  # libc.so / CRT objects / headers are sufficient to compile and link
+  # a real-world Go+CGO application.
+  #
+  # Strategy:
+  #   1. Build mytilus → libc.so + libc.a + crt*.o
+  #   2. Install musl C headers (API definitions only, no libc code)
+  #      + Linux kernel headers for aarch64.
+  #   3. Assemble a self-contained sysroot with our libc as the ONLY
+  #      shared library and ld-musl-aarch64.so.1 as the interpreter.
+  #   4. Create aarch64-mytilus-gcc / aarch64-mytilus-ld wrappers that
+  #      inject --sysroot and --dynamic-linker on every invocation.
+  #   5. Build runc with CGO_ENABLED=1, GOARCH=arm64.
+  # ──────────────────────────────────────────────────────────────────────
+  build-runc:
+    name: Build runc (mytilus, dynamic)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    needs: cross          # only attempt if the basic cross build is green
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions-rust-lang/setup-rust-toolchain@v1
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: runc
+
+      - uses: arduino/setup-task@v2
+        with:
+          version: 3.x
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Install aarch64 cross-compilation toolchain
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq gcc-aarch64-linux-gnu binutils-aarch64-linux-gnu
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.22'
+
+      # ── Build mytilus ──────────────────────────────────────────────
+      - name: Build mytilus libc (libc.so + CRT objects)
+        run: task install PREFIX=$GITHUB_WORKSPACE/sysroot
+
+      # ── Prepare sysroot ───────────────────────────────────────────
+      - name: Prepare sysroot (headers + libs + stubs)
+        run: |
+          SYSROOT=$GITHUB_WORKSPACE/sysroot
+
+          # Install musl C headers (API definitions only — no libc code).
+          # These define the function signatures, struct layouts and
+          # constants that our libc.so implements.
+          curl -sL https://musl.libc.org/releases/musl-1.2.5.tar.gz \
+            | tar xz -C /tmp
+          cd /tmp/musl-1.2.5
+          ./configure --target=aarch64 --prefix="$SYSROOT/usr"
+          make install-headers
+
+          # Overlay mytilus-specific headers (bits/ etc.) on top of musl's.
+          cp -R "$SYSROOT/include/." "$SYSROOT/usr/include/" 2>/dev/null || true
+
+          # Install Linux kernel headers for aarch64.
+          sudo apt-get install -y -qq linux-libc-dev-arm64-cross
+          for d in linux asm asm-generic; do
+            cp -R "/usr/aarch64-linux-gnu/include/$d" "$SYSROOT/usr/include/" \
+              2>/dev/null || true
+          done
+
+          # Library directory.
+          LIBDIR="$SYSROOT/usr/lib"
+          mkdir -p "$LIBDIR"
+
+          # Copy our libc.so / libc.a + CRT objects (from task install).
+          cp "$SYSROOT/lib/libc.so"   "$LIBDIR/libc.so"
+          cp "$SYSROOT/lib/libc.a"    "$LIBDIR/libc.a"
+          cp "$SYSROOT/lib/Scrt1.o"   "$LIBDIR/Scrt1.o"
+          cp "$SYSROOT/lib/crt1.o"    "$LIBDIR/crt1.o"
+          cp "$SYSROOT/lib/crti.o"    "$LIBDIR/crti.o"
+          cp "$SYSROOT/lib/crtn.o"    "$LIBDIR/crtn.o"
+          cp "$SYSROOT/lib/rcrt1.o"   "$LIBDIR/rcrt1.o"
+
+          # PT_INTERP symlink — the kernel loads this at execve time.
+          # In musl's design ld-musl IS libc.so.
+          mkdir -p "$SYSROOT/lib"
+          ln -sf ../usr/lib/libc.so "$SYSROOT/lib/ld-musl-aarch64.so.1"
+
+          # Stub shared libraries — musl folds all of these into libc.so.
+          # Go/runc link against -lpthread -ldl etc.; the linker scripts
+          # redirect each to libc.so so no separate .so is needed.
+          for lib in pthread dl rt util m crypt resolv; do
+            echo "GROUP ( libc.so )" > "$LIBDIR/lib${lib}.so"
+            ar rcs "$LIBDIR/lib${lib}.a"
+          done
+
+      # ── Cross-compilation wrappers ────────────────────────────────
+      #
+      # Go with CGO_ENABLED=1 calls CC to compile C code, then calls the
+      # external linker (discovered via `CC -print-prog-name=ld`) for the
+      # final link.  By intercepting both paths we ensure every invocation
+      # uses our sysroot and dynamic-linker, with zero glibc contamination.
+
+      - name: Create aarch64-mytilus-gcc and aarch64-mytilus-ld wrappers
+        run: |
+          DIR="$GITHUB_WORKSPACE"
+
+          cat > "$DIR/aarch64-mytilus-gcc" << 'WRAPPER'
+          #!/bin/bash
+          set -euo pipefail
+          SELF_DIR="$(cd "$(dirname "$0")" && pwd)"
+          SYSROOT="$SELF_DIR/sysroot"
+
+          # When Go asks for the linker path, return our ld wrapper so
+          # --sysroot and --dynamic-linker are always applied at link time.
+          if [[ "${1:-}" == "-print-prog-name=ld" ]]; then
+            echo "$SELF_DIR/aarch64-mytilus-ld"
+            exit 0
+          fi
+
+          exec aarch64-linux-gnu-gcc \
+            --sysroot="$SYSROOT" \
+            -L"$SYSROOT/usr/lib" \
+            -Wl,--dynamic-linker=/lib/ld-musl-aarch64.so.1 \
+            "$@"
+          WRAPPER
+
+          cat > "$DIR/aarch64-mytilus-ld" << 'WRAPPER'
+          #!/bin/bash
+          set -euo pipefail
+          SELF_DIR="$(cd "$(dirname "$0")" && pwd)"
+          SYSROOT="$SELF_DIR/sysroot"
+
+          exec aarch64-linux-gnu-ld \
+            --sysroot="$SYSROOT" \
+            -L"$SYSROOT/usr/lib" \
+            --dynamic-linker=/lib/ld-musl-aarch64.so.1 \
+            "$@"
+          WRAPPER
+
+          chmod +x "$DIR/aarch64-mytilus-gcc" "$DIR/aarch64-mytilus-ld"
+
+      # ── Build runc ────────────────────────────────────────────────
+      - name: Clone runc v1.1.12
+        run: git clone --depth 1 --branch v1.1.12 https://github.com/opencontainers/runc.git /tmp/runc
+
+      - name: Build runc (dynamically linked against mytilus only)
+        working-directory: /tmp/runc
+        env:
+          CGO_ENABLED: 1
+          GOARCH: arm64
+          CC: ${{ github.workspace }}/aarch64-mytilus-gcc
+        run: |
+          go build -trimpath -tags="noseccomp" -o runc ./
+
+      # ── Verify ────────────────────────────────────────────────────
+      - name: Verify runc binary
+        run: |
+          BINARY=/tmp/runc/runc
+
+          echo "=== File type ==="
+          file "$BINARY"
+
+          echo "=== Program interpreter (must be ld-musl-aarch64.so.1) ==="
+          aarch64-linux-gnu-readelf -l "$BINARY" 2>/dev/null | grep -A1 INTERP
+
+          echo "=== Required shared libraries (must be only libc.so) ==="
+          aarch64-linux-gnu-readelf -d "$BINARY" 2>/dev/null | grep NEEDED
+
+          echo "=== Verify: NO glibc linkage ==="
+          ! aarch64-linux-gnu-readelf -d "$BINARY" 2>/dev/null | grep -qi 'ld-linux'
+
+      - name: Upload runc binary
+        uses: actions/upload-artifact@v4
+        with:
+          name: runc-aarch64-mytilus
+          path: /tmp/runc/runc
