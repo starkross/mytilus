@@ -103,3 +103,93 @@ jobs:
 
       - name: task build
         run: task build
+
+  # ──────────────────────────────────────────────────────────────────────
+  # Integration gate: build runc as aarch64 Linux PIE dynamically linked
+  # against mytilus only (no glibc, no system musl).
+  # ──────────────────────────────────────────────────────────────────────
+  runc:
+    name: runc (dynamic link against mytilus)
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions-rust-lang/setup-rust-toolchain@v1
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.23.x'
+
+      - uses: arduino/setup-task@v2
+        with:
+          version: 3.x
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build + stage mytilus sysroot
+        run: |
+          task install PREFIX="$PWD/dist"
+          ln -sf libc.so dist/lib/ld-musl-aarch64.so.1
+
+      - name: Create mytilus aarch64 C toolchain wrapper
+        run: |
+          mkdir -p "$PWD/dist/bin"
+          cat > "$PWD/dist/bin/aarch64-linux-muslrs-gcc" <<'EOF'
+          #!/usr/bin/env bash
+          set -euo pipefail
+          : "${MUSLRS_SYSROOT:?MUSLRS_SYSROOT is not set}"
+          exec clang \
+            --target=aarch64-unknown-linux-gnu \
+            -fuse-ld=lld \
+            --sysroot="${MUSLRS_SYSROOT}" \
+            -isystem "${MUSLRS_SYSROOT}/include" \
+            -L"${MUSLRS_SYSROOT}/lib" \
+            -B"${MUSLRS_SYSROOT}/lib" \
+            -Wl,--dynamic-linker=/lib/ld-musl-aarch64.so.1 \
+            -Wl,-rpath-link,"${MUSLRS_SYSROOT}/lib" \
+            "$@"
+          EOF
+          chmod +x "$PWD/dist/bin/aarch64-linux-muslrs-gcc"
+
+      - name: Checkout runc
+        uses: actions/checkout@v4
+        with:
+          repository: opencontainers/runc
+          path: runc
+
+      - name: Build runc (linux/arm64, dynamic, external linker)
+        env:
+          MUSLRS_SYSROOT: ${{ github.workspace }}/dist
+        run: |
+          cd runc
+          export PATH="$GITHUB_WORKSPACE/dist/bin:$PATH"
+          export GOOS=linux
+          export GOARCH=arm64
+          export CGO_ENABLED=1
+          export CC=aarch64-linux-muslrs-gcc
+          go build \
+            -buildmode=pie \
+            -trimpath \
+            -ldflags='-linkmode=external' \
+            -o runc \
+            ./
+
+      - name: Verify dynamic linker and NEEDED deps
+        run: |
+          readelf -l runc/runc | tee /tmp/runc-phdr.txt
+          readelf -d runc/runc | tee /tmp/runc-dyn.txt
+
+          grep -F 'Requesting program interpreter: /lib/ld-musl-aarch64.so.1' /tmp/runc-phdr.txt
+
+          needed_lines=$(grep -F '(NEEDED)' /tmp/runc-dyn.txt || true)
+          echo "$needed_lines"
+
+          # Must link only against our libc.so (no glibc, no upstream musl,
+          # no extra runtime libs).
+          [ "$(echo "$needed_lines" | wc -l | tr -d ' ')" = "1" ]
+          echo "$needed_lines" | grep -F 'Shared library: [libc.so]'
+
+          if grep -E 'libc\.so\.6|ld-linux|libmusl' /tmp/runc-dyn.txt; then
+            echo 'unexpected glibc/system-musl dependency detected'
+            exit 1
+          fi
