@@ -148,6 +148,16 @@ jobs:
       - name: Build and install mytilus
         run: task install
 
+      # Checkout upstream musl source (headers only — no implementation
+      # code is compiled; pure API declarations used for C type/macro
+      # definitions). The binary links exclusively against mytilus libc.so.
+      - name: Checkout musl headers
+        uses: actions/checkout@v4
+        with:
+          repository: bminor/musl
+          path: /tmp/musl-src
+          fetch-depth: 1
+
       # Populate C headers from upstream musl. These are pure API
       # declarations (function signatures, type definitions, macro
       # constants) — they contain no implementation code whatsoever.
@@ -156,7 +166,6 @@ jobs:
         run: |
           SYSROOT="$GITHUB_WORKSPACE/dist"
 
-          git clone --depth 1 https://github.com/bminor/musl.git /tmp/musl-src
           cd /tmp/musl-src
 
           # --- Top-level and subdirectory headers (skip bits/ — handled below) ---
