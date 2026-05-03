@@ -103,3 +103,223 @@ jobs:
 
       - name: task build
         run: task build
+
+  # ──────────────────────────────────────────────────────────────────────
+  # Integration test: build upstream runc linked against mytilus libc.
+  #
+  # This job proves that an external real-world Go+CGo project can be
+  # cross-compiled for aarch64-linux-musl using mytilus as its exclusive
+  # libc.  The resulting binary must be dynamically linked and must not
+  # transitively pull in glibc or a system musl.
+  #
+  # While mytilus is still early-phase and may not yet export every symbol
+  # runc needs, the infrastructure here is intentionally complete so the
+  # job transitions from "link-time validation" to "full build" as mytilus
+  # matures without further CI changes.
+  # ──────────────────────────────────────────────────────────────────────
+  build-runc:
+    name: Build runc against mytilus (aarch64-linux-musl)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      # ──────────────────────────────────────────────────────────────────
+      # 1. Checkout and install build-time dependencies
+      # ──────────────────────────────────────────────────────────────────
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.22'
+
+      # Picks up nightly + rust-src + clippy + rustfmt from rust-toolchain.toml.
+      - uses: actions-rust-lang/setup-rust-toolchain@v1
+
+      - uses: arduino/setup-task@v2
+        with:
+          version: 3.x
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
+
+      # qemu-user-static lets us run aarch64 binaries (e.g. ldd) on x86_64.
+      # binutils provides readelf/objdump for cross-arch inspection.
+      - name: Install qemu and binutils
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y qemu-user-static binutils
+
+      # ──────────────────────────────────────────────────────────────────
+      # 2. Download pre-built aarch64-linux-musl cross-compiler
+      #    Go does not ship a musl cross-compiler; we need an external one.
+      #    musl.cc provides a zero-dependency toolchain tarball.
+      # ──────────────────────────────────────────────────────────────────
+      - name: Install aarch64-linux-musl cross toolchain
+        run: |
+          curl -fsSL "https://musl.cc/aarch64-linux-musl-cross.tgz" -o /tmp/aarch64-linux-musl-cross.tgz
+          sudo tar -xzf /tmp/aarch64-linux-musl-cross.tgz -C /opt
+          rm /tmp/aarch64-linux-musl-cross.tgz
+          echo "/opt/aarch64-linux-musl-cross/bin" >> "$GITHUB_PATH"
+
+      # ──────────────────────────────────────────────────────────────────
+      # 3. Build mytilus and stage into ./dist
+      # ──────────────────────────────────────────────────────────────────
+      - name: Build mytilus libc artifacts
+        run: task install PREFIX=./dist
+
+      # ──────────────────────────────────────────────────────────────────
+      # 4. Assemble sysroot: musl.cc headers + mytilus libs
+      #    mytilus headers/ are still early-phase; we compile against
+      #    musl.cc's complete headers but link against mytilus libc.{so,a}
+      #    so the binary is bound to our implementation at link time.
+      # ──────────────────────────────────────────────────────────────────
+      - name: Assemble sysroot
+        run: |
+          mkdir -p sysroot/lib sysroot/include
+          # Seed with musl.cc's headers (complete C library headers).
+          cp -r /opt/aarch64-linux-musl-cross/aarch64-linux-musl/include/. sysroot/include/
+          # Seed with musl.cc's startup files + non-libc libs.
+          cp -r /opt/aarch64-linux-musl-cross/aarch64-linux-musl/lib/. sysroot/lib/
+          # Overwrite libc with mytilus artifacts (this is the key swap).
+          cp dist/lib/libc.so   sysroot/lib/libc.so
+          cp dist/lib/libc.a    sysroot/lib/libc.a
+          cp dist/lib/crt1.o    sysroot/lib/crt1.o
+          cp dist/lib/crti.o    sysroot/lib/crti.o
+          cp dist/lib/crtn.o    sysroot/lib/crtn.o
+          cp dist/lib/Scrt1.o   sysroot/lib/Scrt1.o
+          cp dist/lib/rcrt1.o   sysroot/lib/rcrt1.o
+          # Overlay mytilus headers where they exist (future-proofs as they grow).
+          cp -r dist/include/. sysroot/include/ 2>/dev/null || true
+          # musl convention: the dynamic linker entry point is libc.so aliased.
+          ln -sf libc.so sysroot/lib/ld-musl-aarch64.so.1
+
+      # ──────────────────────────────────────────────────────────────────
+      # 5. Create compiler wrapper so Go can pass --sysroot via CC_FOR_TARGET
+      #    Go treats CC_FOR_TARGET as a single executable path, not a shell
+      #    command with arguments. A small wrapper script bridges the gap.
+      # ──────────────────────────────────────────────────────────────────
+      - name: Create musl gcc wrapper with sysroot
+        run: |
+          SYSROOT="$PWD/sysroot"
+          # Bake the absolute sysroot path into the wrapper via env var
+          # so the script is self-contained.
+          { echo '#!/bin/bash'
+            echo 'exec /opt/aarch64-linux-musl-cross/bin/aarch64-linux-musl-gcc --sysroot="'"$SYSROOT"'" "$@"'
+          } > "$SYSROOT/gcc-wrapper"
+          chmod +x "$SYSROOT/gcc-wrapper"
+
+      # ──────────────────────────────────────────────────────────────────
+      # 6. Clone and build runc
+      #    Disable seccomp/apparmor build tags so we don't pull in external
+      #    libraries that could transitively drag in another libc.
+      # ──────────────────────────────────────────────────────────────────
+      - name: Clone runc
+        run: |
+          git clone --depth 1 https://github.com/opencontainers/runc.git /tmp/runc
+          # Optionally pin to a known release for reproducibility:
+          # git -C /tmp/runc checkout v1.1.12
+
+      - name: Build runc with mytilus libc
+        working-directory: /tmp/runc
+        env:
+          GOOS: linux
+          GOARCH: arm64
+          CGO_ENABLED: '1'
+          CC_FOR_TARGET: ${{ github.workspace }}/sysroot/gcc-wrapper
+          # Force external linking so the musl linker driver embeds the musl
+          # INTERP and NEEDED entries. Go's internal linker has poor musl
+          # cross-compilation awareness and defaults to static linking.
+          GOFLAGS: -ldflags=-linkmode=external
+        run: |
+          # BUILDTAGS="" removes seccomp/apparmor to keep the dependency
+          # surface minimal -- we only want to exercise libc linkage.
+          make BUILDTAGS="" runc
+
+      # ──────────────────────────────────────────────────────────────────
+      # 7. Verification: confirm the binary is dynamically linked against
+      #    mytilus libc and absolutely nothing else looks like glibc.
+      #
+      #    Correct output indicators:
+      #      - file: "ELF 64-bit LSB executable, ARM aarch64, ... dynamically linked"
+      #      - readelf -l: "[Requesting program interpreter: /lib/ld-musl-aarch64.so.1]"
+      #      - readelf -d: "NEEDED               [libc.so]"
+      #
+      #    Problem indicators:
+      #      - No INTERP segment -> statically linked (FAIL)
+      #      - NEEDED libc.so.6  -> glibc leaked in (FAIL)
+      #      - INTERP ld-linux*  -> glibc dynamic linker (FAIL)
+      # ──────────────────────────────────────────────────────────────────
+      - name: Verify runc is dynamically linked against mytilus
+        working-directory: /tmp/runc
+        run: |
+          echo "=== file runc ==="
+          file runc
+
+          echo ""
+          echo "=== readelf -l (segments; look for INTERP) ==="
+          readelf -l runc
+
+          echo ""
+          echo "=== readelf -d (dynamic section; look for NEEDED) ==="
+          readelf -d runc
+
+          echo ""
+          echo "=== Verification checks ==="
+
+          # Check 1: must be dynamically linked (INTERP segment exists).
+          if readelf -l runc | grep -q "INTERP"; then
+            echo "PASS: Binary has INTERP segment (dynamically linked)."
+          else
+            echo "FAIL: Binary is statically linked (no INTERP segment)."
+            exit 1
+          fi
+
+          # Check 2: must depend on musl libc.so, not glibc libc.so.6.
+          if readelf -d runc | grep "NEEDED" | grep -q "libc.so.6"; then
+            echo "FAIL: Binary links against glibc (libc.so.6 found)."
+            exit 1
+          fi
+
+          if readelf -d runc | grep "NEEDED" | grep -q "libc.so"; then
+            echo "PASS: Binary links against musl libc (libc.so found)."
+          else
+            echo "FAIL: Binary does not declare a NEEDED libc.so."
+            exit 1
+          fi
+
+          # Check 3: must not reference glibc dynamic linker.
+          if readelf -l runc | grep -E "INTERP" | grep -q "ld-linux"; then
+            echo "FAIL: INTERP points to glibc dynamic linker (ld-linux-*)."
+            exit 1
+          fi
+
+          # Check 4: INTERP must be the musl dynamic linker.
+          if readelf -l runc | grep -E "INTERP" | grep -q "ld-musl-aarch64.so.1"; then
+            echo "PASS: INTERP is musl dynamic linker."
+          else
+            echo "FAIL: INTERP is not the expected musl dynamic linker."
+            exit 1
+          fi
+
+          echo ""
+          echo "=== objdump -p (alternative view of NEEDED) ==="
+          objdump -p runc | grep NEEDED
+
+      # Optional: run cross-arch ldd to see runtime resolution. This is
+      # informational only -- if mytilus is incomplete the binary may not
+      # actually have every undefined symbol resolved, but the static checks
+      # above already proved the *intent* of linkage is correct.
+      - name: Verify runtime resolution (informational)
+        working-directory: /tmp/runc
+        continue-on-error: true
+        run: |
+          echo "=== qemu ldd against our sysroot ==="
+          LD_TRACE_LOADED_OBJECTS=1 qemu-aarch64-static -L "${{ github.workspace }}/sysroot" \
+            "${{ github.workspace }}/sysroot/lib/ld-musl-aarch64.so.1" \
+            --list ./runc || true
+
+      # ──────────────────────────────────────────────────────────────────
+      # 8. Upload artifact
+      # ──────────────────────────────────────────────────────────────────
+      - name: Upload runc binary
+        uses: actions/upload-artifact@v4
+        with:
+          name: runc-aarch64-mytilus
+          path: /tmp/runc/runc
