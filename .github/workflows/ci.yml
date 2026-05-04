@@ -103,3 +103,97 @@ jobs:
 
       - name: task build
         run: task build
+
+  # ──────────────────────────────────────────────────────────────────────
+  # Integration: build runc dynamically linked against mytilus libc only.
+  # We intentionally force external linking and inject mytilus crt objects,
+  # libc.so, and PT_INTERP (`/lib/ld-musl-aarch64.so.1`) from this repo.
+  #
+  # Notes:
+  # - This is a cross-build (linux/arm64) on ubuntu-latest.
+  # - We disable runc's seccomp tag here to avoid pulling libseccomp.
+  # - Final ELF checks assert no glibc loader/soname dependency slips in.
+  # ──────────────────────────────────────────────────────────────────────
+  runc-mytilus-dynamic:
+    name: runc (dynamic, mytilus libc only)
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions-rust-lang/setup-rust-toolchain@v1
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: 'stable'
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: runc-mytilus
+
+      - uses: arduino/setup-task@v2
+        with:
+          version: 3.x
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Install cross toolchain utilities
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            gcc-aarch64-linux-gnu \
+            binutils-aarch64-linux-gnu
+
+      - name: Build + stage mytilus sysroot
+        run: |
+          task install PREFIX="$RUNNER_TEMP/mytilus-sysroot"
+
+          SYSROOT="$RUNNER_TEMP/mytilus-sysroot"
+          # musl convention: loader soname path for aarch64.
+          ln -sf libc.so "$SYSROOT/lib/ld-musl-aarch64.so.1"
+
+          # Go/cgo can request these via -l<name>; in musl they are aliases.
+          for lib in pthread dl m rt util crypt resolv; do
+            ln -sf libc.so "$SYSROOT/lib/lib${lib}.so"
+          done
+
+      - name: Build runc for linux/arm64 against mytilus libc.so
+        env:
+          GOOS: linux
+          GOARCH: arm64
+          CGO_ENABLED: '1'
+          CC: aarch64-linux-gnu-gcc
+        run: |
+          set -euxo pipefail
+          SYSROOT="$RUNNER_TEMP/mytilus-sysroot"
+
+          git clone --depth 1 https://github.com/opencontainers/runc.git
+          cd runc
+
+          make runc \
+            RUNC_BUILDTAGS='-seccomp' \
+            EXTRA_FLAGS='-mod=vendor' \
+            EXTRA_LDFLAGS="-linkmode external -extld=${CC} -extldflags '-nostdlib -pie ${SYSROOT}/lib/Scrt1.o ${SYSROOT}/lib/crti.o -L${SYSROOT}/lib -Wl,--dynamic-linker=/lib/ld-musl-aarch64.so.1 -Wl,-rpath,/lib -lc -lgcc ${SYSROOT}/lib/crtn.o'"
+
+      - name: Verify ELF is dynamically linked to mytilus (no glibc/musl deps)
+        run: |
+          set -euxo pipefail
+          BIN="runc/runc"
+
+          file "$BIN"
+          aarch64-linux-gnu-readelf -lW "$BIN"
+          aarch64-linux-gnu-readelf -dW "$BIN"
+
+          # Must use our loader path.
+          aarch64-linux-gnu-readelf -lW "$BIN" | grep -E '/lib/ld-musl-aarch64.so.1'
+          # Must depend on plain libc.so from our sysroot (and nothing else).
+          needed="$(aarch64-linux-gnu-readelf -dW "$BIN" | sed -n 's/.*Shared library: \[\(.*\)\].*/\1/p' | sort -u)"
+          test "$needed" = "libc.so"
+
+          # Must not pull glibc/ld-linux or foreign musl sonames.
+          ! aarch64-linux-gnu-readelf -dW "$BIN" | grep -E 'libc\.so\.6|ld-linux|musl\.so\.1|libgcc_s\.so\.1'
+
+      - name: Upload runc artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: runc-linux-arm64-mytilus-dynamic
+          path: runc/runc
